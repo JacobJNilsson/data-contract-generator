@@ -5,38 +5,92 @@ import (
 	"context"
 	csvstd "encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
 
-// AnalyzeFile reads a CSV file and produces a SourceContract describing
-// its structure, encoding, schema, and data quality.
+// AnalyzeFile opens a CSV file and produces a SourceContract describing
+// its structure, encoding, schema, and data quality. For backend use
+// where the data comes from a stream (HTTP upload, S3, etc.), use
+// AnalyzeReader directly.
 func AnalyzeFile(ctx context.Context, path string, opts *Options) (*SourceContract, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	contract, err := AnalyzeReader(ctx, f, opts)
+	if err != nil {
+		return nil, err
+	}
+	contract.SourcePath = path
+	return contract, nil
+}
+
+// AnalyzeReader analyzes CSV data from a seekable reader. It reads the
+// stream in two phases:
+//
+//  1. Sniff: read the first 8KB to detect encoding and delimiter, then
+//     seek back to the start.
+//  2. Stream: single sequential pass through the CSV reader. The first
+//     row is used for header detection. Up to SampleSize data rows are
+//     kept in memory for type inference and profiling. All remaining
+//     rows are counted but not stored.
+//
+// Peak memory is proportional to SampleSize (default 1000 rows), not
+// the file size. A 2GB file uses a few MB of RAM.
+func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*SourceContract, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	encoding, hasBOM := detectEncodingFromBytes(raw)
+	// Phase 1: sniff encoding and delimiter from the first 8KB.
+	sniffBuf := make([]byte, sniffSize)
+	n, err := io.ReadFull(rs, sniffBuf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, fmt.Errorf("read sniff buffer: %w", err)
+	}
+	sniffBuf = sniffBuf[:n]
 
-	// Normalize to UTF-8 for all subsequent processing.
-	// Only strip BOM for UTF-8 files. A UTF-8 BOM (EF BB BF) in a
-	// Latin-1 file would be three printable characters, not a BOM.
-	content := raw
+	encoding, hasBOM := detectEncodingFromBytes(sniffBuf)
+
+	// Detect delimiter from the sniff buffer (already decoded for UTF-8,
+	// needs decoding for Latin-1).
+	delimBuf := sniffBuf
+	if hasBOM {
+		delimBuf = bytes.TrimPrefix(delimBuf, utf8BOM)
+	}
 	if encoding == "latin-1" {
 		hasBOM = false
-		content = decodeLatin1(content)
-	} else if hasBOM {
-		content = bytes.TrimPrefix(content, utf8BOM)
+		delimBuf = decodeLatin1(delimBuf)
+	}
+	delimiter := detectDelimiterFromBytes(delimBuf)
+
+	// Seek back to start for the full streaming pass.
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek to start: %w", err)
 	}
 
-	delimiter := detectDelimiterFromBytes(content)
+	// Phase 2: stream through the CSV content.
+	var csvReader io.Reader = rs
+	if hasBOM {
+		// Skip the 3-byte BOM before feeding to the CSV parser.
+		bomBuf := make([]byte, len(utf8BOM))
+		if _, err := io.ReadFull(rs, bomBuf); err != nil {
+			return nil, fmt.Errorf("skip BOM: %w", err)
+		}
+	}
+	if encoding == "latin-1" {
+		csvReader = newLatin1Reader(csvReader)
+	}
 
-	result, err := parseAndAnalyze(content, delimiter, opts)
+	result, err := streamAnalyze(ctx, csvReader, delimiter, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +101,6 @@ func AnalyzeFile(ctx context.Context, path string, opts *Options) (*SourceContra
 	}
 
 	result.SourceFormat = "csv"
-	result.SourcePath = path
 	result.Encoding = encoding
 	result.Delimiter = string(delimiter)
 	result.Issues = issues
@@ -55,51 +108,68 @@ func AnalyzeFile(ctx context.Context, path string, opts *Options) (*SourceContra
 	return result, nil
 }
 
-// parseAndAnalyze does a single pass over the CSV content, collecting
-// all information needed for the contract: header detection, row counting,
-// type inference, and per-column profiling.
-func parseAndAnalyze(content []byte, delimiter rune, opts *Options) (*SourceContract, error) {
-	allRows := readAllRows(content, delimiter)
-	if len(allRows) == 0 {
+// streamAnalyze does a single sequential pass over the CSV content,
+// collecting header, sample rows, type inference, profiling, and total
+// row count. Only SampleSize rows are held in memory.
+func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Options) (*SourceContract, error) {
+	reader := csvstd.NewReader(r)
+	reader.Comma = delimiter
+	reader.LazyQuotes = true
+	reader.FieldsPerRecord = -1
+
+	// Read the first row to determine header/field names.
+	firstRow, err := reader.Read()
+	if err != nil {
 		return nil, fmt.Errorf("file is empty")
 	}
 
-	hasHeader := detectHeader(allRows[0])
+	hasHeader := detectHeader(firstRow)
 
 	var fieldNames []string
-	var dataRows [][]string
+	var sampleRows [][]string
+
+	sampleSize := opts.sampleSize()
 
 	if hasHeader {
-		fieldNames = allRows[0]
+		fieldNames = firstRow
 		if len(fieldNames) > 0 {
-			// Defense in depth: the BOM was already stripped from raw bytes
-			// in AnalyzeFile, but some CSV readers re-introduce the BOM
-			// character (U+FEFF) as a zero-width no-break space. Strip it
-			// if present to keep field names clean.
+			// Defense in depth: strip BOM character if the CSV reader
+			// re-introduces it as a zero-width no-break space.
 			fieldNames[0] = strings.TrimPrefix(fieldNames[0], "\ufeff")
 		}
-		dataRows = allRows[1:]
 	} else {
-		if len(allRows[0]) > 0 {
-			fieldNames = generateFieldNames(len(allRows[0]))
+		if len(firstRow) > 0 {
+			fieldNames = generateFieldNames(len(firstRow))
 		}
-		dataRows = allRows
+		// First row is data, not a header -- include it in the sample.
+		sampleRows = append(sampleRows, firstRow)
+	}
+
+	// Stream remaining rows: keep up to sampleSize in memory, count the rest.
+	totalRows := len(sampleRows)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		record, readErr := reader.Read()
+		if readErr != nil {
+			break
+		}
+		totalRows++
+		if len(sampleRows) < sampleSize {
+			sampleRows = append(sampleRows, record)
+		}
 	}
 
 	numFields := len(fieldNames)
-	sampleSize := opts.sampleSize()
 
-	// Use at most sampleSize rows for type inference and profiling.
-	analysisRows := dataRows
-	if len(analysisRows) > sampleSize {
-		analysisRows = analysisRows[:sampleSize]
-	}
-
-	columnTypes := inferColumnTypes(analysisRows, numFields)
+	// Use the sample rows for type inference and profiling.
+	columnTypes := inferColumnTypes(sampleRows, numFields)
 
 	fields := make([]Field, numFields)
 	for i, name := range fieldNames {
-		colValues := extractColumn(analysisRows, i)
+		colValues := extractColumn(sampleRows, i)
 		fields[i] = Field{
 			Name:     name,
 			DataType: columnTypes[i],
@@ -108,33 +178,17 @@ func parseAndAnalyze(content []byte, delimiter rune, opts *Options) (*SourceCont
 	}
 
 	maxSampleRows := opts.maxSampleRows()
-	sampleData := dataRows
+	sampleData := sampleRows
 	if len(sampleData) > maxSampleRows {
 		sampleData = sampleData[:maxSampleRows]
 	}
 
 	return &SourceContract{
 		HasHeader:  hasHeader,
-		TotalRows:  len(dataRows),
+		TotalRows:  totalRows,
 		Fields:     fields,
 		SampleData: sampleData,
 	}, nil
-}
-
-// readAllRows parses all CSV records from content. With LazyQuotes and
-// no field count constraint, parse errors are extremely unlikely, but
-// we handle them by stopping and returning what was successfully read.
-func readAllRows(content []byte, delimiter rune) [][]string {
-	reader := csvstd.NewReader(bytes.NewReader(content))
-	reader.Comma = delimiter
-	reader.LazyQuotes = true
-	reader.FieldsPerRecord = -1
-
-	// ReadAll is safe here: with LazyQuotes=true and FieldsPerRecord=-1,
-	// the only error it returns is from the underlying io.Reader, which
-	// for bytes.Reader is always nil.
-	rows, _ := reader.ReadAll()
-	return rows
 }
 
 // extractColumn collects all values for a single column index from the
