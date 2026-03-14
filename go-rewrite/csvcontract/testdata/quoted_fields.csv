@@ -1,0 +1,5 @@
+Name,Description,Value
+Alice,"Has a comma, in description",100
+Bob,"Has ""quotes"" inside",200
+Charlie,"Line one
+Line two",300

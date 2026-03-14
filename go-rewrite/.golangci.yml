@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 2m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters-settings:
+  govet:
+    disable:
+      - fieldalignment
+
+issues:
+  exclude-use-default: false

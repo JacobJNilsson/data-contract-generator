@@ -1,0 +1,6 @@
+﻿Date;Account;Amount;Currency;Quantity
+2024-01-15;Depot;1234,56;SEK;100
+2024-01-16;Savings;;SEK;
+2024-01-17;Depot;5678,90;SEK;200
+2024-01-18;Savings;910,11;SEK;50
+2024-01-19;Depot;;SEK;
