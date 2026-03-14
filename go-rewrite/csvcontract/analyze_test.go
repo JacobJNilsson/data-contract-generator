@@ -1,8 +1,11 @@
 package csvcontract
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -490,10 +493,178 @@ func TestAnalyzeUnreadableFile(t *testing.T) {
 	}
 }
 
-func TestParseAndAnalyzeEmpty(t *testing.T) {
-	_, err := parseAndAnalyze(nil, ',', nil)
+func TestAnalyzeReaderEmpty(t *testing.T) {
+	r := bytes.NewReader(nil)
+	_, err := AnalyzeReader(ctx, r, nil)
 	if err == nil {
 		t.Fatal("expected error for empty content")
+	}
+}
+
+func TestAnalyzeReaderDirect(t *testing.T) {
+	data := []byte("Name,Age\nAlice,30\nBob,25\n")
+	r := bytes.NewReader(data)
+	contract, err := AnalyzeReader(ctx, r, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.TotalRows != 2 {
+		t.Errorf("total_rows = %d, want 2", contract.TotalRows)
+	}
+	if contract.SourcePath != "" {
+		t.Errorf("source_path = %q, want empty for reader", contract.SourcePath)
+	}
+	if contract.Encoding != "utf-8" {
+		t.Errorf("encoding = %q, want utf-8", contract.Encoding)
+	}
+}
+
+func TestAnalyzeReaderCancelled(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	r := bytes.NewReader([]byte("a,b\n1,2\n"))
+	_, err := AnalyzeReader(cancelled, r, nil)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+}
+
+func TestAnalyzeReaderCancelDuringStream(t *testing.T) {
+	// Cancel the context after the sniff phase completes but before
+	// all rows are read. We use a large enough file that streaming
+	// will check ctx.Err() at least once.
+	var buf bytes.Buffer
+	buf.WriteString("Name,Value\n")
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&buf, "row%d,%d\n", i, i)
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+
+	// Wrap the reader to cancel after the sniff phase seek.
+	r := &cancelAfterSeekReader{
+		ReadSeeker: bytes.NewReader(buf.Bytes()),
+		cancel:     cancel,
+	}
+
+	_, err := AnalyzeReader(cancelCtx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for context cancelled during streaming")
+	}
+}
+
+// cancelAfterSeekReader cancels its context after the first Seek call,
+// simulating a cancellation that arrives between sniff and stream phases.
+type cancelAfterSeekReader struct {
+	io.ReadSeeker
+	cancel func()
+	seeked bool
+}
+
+func (r *cancelAfterSeekReader) Seek(offset int64, whence int) (int64, error) {
+	n, err := r.ReadSeeker.Seek(offset, whence)
+	if !r.seeked {
+		r.seeked = true
+		r.cancel()
+	}
+	return n, err
+}
+
+func TestAnalyzeReaderSeekError(t *testing.T) {
+	r := &failSeekReader{data: []byte("a,b\n1,2\n")}
+	_, err := AnalyzeReader(ctx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for seek failure")
+	}
+}
+
+type failSeekReader struct {
+	data   []byte
+	offset int
+}
+
+func (r *failSeekReader) Read(p []byte) (int, error) {
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *failSeekReader) Seek(_ int64, _ int) (int64, error) {
+	return 0, fmt.Errorf("seek not supported")
+}
+
+func TestAnalyzeReaderReadError(t *testing.T) {
+	r := &failReadSeeker{}
+	_, err := AnalyzeReader(ctx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for read failure")
+	}
+}
+
+type failReadSeeker struct{}
+
+func (r *failReadSeeker) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("disk error")
+}
+
+func (r *failReadSeeker) Seek(_ int64, _ int) (int64, error) {
+	return 0, nil
+}
+
+func TestAnalyzeReaderBOMReadError(t *testing.T) {
+	// A file that has a BOM in the sniff buffer, seeks back fine,
+	// but fails when trying to skip the BOM bytes in phase 2.
+	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
+	r := &failAfterSeekReader{data: data}
+	_, err := AnalyzeReader(ctx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for BOM skip failure")
+	}
+}
+
+type failAfterSeekReader struct {
+	data   []byte
+	offset int
+	seeked bool
+}
+
+func (r *failAfterSeekReader) Read(p []byte) (int, error) {
+	if r.seeked {
+		return 0, fmt.Errorf("read failed after seek")
+	}
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *failAfterSeekReader) Seek(offset int64, whence int) (int64, error) {
+	if whence == io.SeekStart && offset == 0 {
+		r.seeked = true
+		r.offset = 0
+	}
+	return int64(r.offset), nil
+}
+
+func TestAnalyzeReaderBOM(t *testing.T) {
+	// Verify BOM handling works through the streaming path.
+	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
+	r := bytes.NewReader(data)
+	contract, err := AnalyzeReader(ctx, r, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.Fields[0].Name != "Name" {
+		t.Errorf("field name = %q, want Name", contract.Fields[0].Name)
+	}
+	if len(contract.Issues) != 1 || contract.Issues[0] != "UTF-8 BOM detected and stripped" {
+		t.Errorf("issues = %v, want BOM issue", contract.Issues)
 	}
 }
 
