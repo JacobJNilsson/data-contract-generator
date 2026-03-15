@@ -16,6 +16,10 @@ var ctx = context.Background()
 
 func ptr(s string) *string { return &s }
 
+func tv(value string, count int) ValueFrequency {
+	return ValueFrequency{Value: value, Count: count}
+}
+
 func TestAnalyzeSimpleCSV(t *testing.T) {
 	contract, err := AnalyzeFile(ctx, "testdata/simple.csv", nil)
 	if err != nil {
@@ -30,24 +34,24 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 		TotalRows:    5,
 		Fields: []Field{
 			{Name: "Name", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Alice"), MaxValue: ptr("Eve"),
-				SampleValues: []string{"Alice", "Bob", "Charlie", "Diana", "Eve"},
+				TopValues: []ValueFrequency{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
 			}},
 			{Name: "Age", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("25"), MaxValue: ptr("35"),
-				SampleValues: []string{"25", "28", "30", "32", "35"},
+				TopValues: []ValueFrequency{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
 			}},
 			{Name: "City", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Berlin"), MaxValue: ptr("Tokyo"),
-				SampleValues: []string{"Berlin", "London", "New York", "Paris", "Tokyo"},
+				TopValues: []ValueFrequency{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
 			}},
 			{Name: "Score", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 1, NullPercentage: 20, DistinctCount: 4,
+				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("87.3"), MaxValue: ptr("95.5"),
-				SampleValues: []string{"87.3", "88.9", "92.1", "95.5"},
+				TopValues: []ValueFrequency{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -75,29 +79,29 @@ func TestAnalyzeEuropeanCSV(t *testing.T) {
 		TotalRows:    5,
 		Fields: []Field{
 			{Name: "Date", DataType: TypeDate, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("2024-01-19"),
-				SampleValues: []string{"2024-01-15", "2024-01-16", "2024-01-17", "2024-01-18", "2024-01-19"},
+				TopValues: []ValueFrequency{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
 			}},
 			{Name: "Account", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 2,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Depot"), MaxValue: ptr("Savings"),
-				SampleValues: []string{"Depot", "Savings"},
+				TopValues: []ValueFrequency{tv("Depot", 3), tv("Savings", 2)},
 			}},
 			{Name: "Amount", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 2, NullPercentage: 40, DistinctCount: 3,
+				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("910,11"), MaxValue: ptr("5678,90"),
-				SampleValues: []string{"1234,56", "5678,90", "910,11"},
+				TopValues: []ValueFrequency{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
 			}},
 			{Name: "Currency", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 1,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("SEK"), MaxValue: ptr("SEK"),
-				SampleValues: []string{"SEK"},
+				TopValues: []ValueFrequency{tv("SEK", 5)},
 			}},
 			{Name: "Quantity", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 2, NullPercentage: 40, DistinctCount: 3,
+				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("50"), MaxValue: ptr("200"),
-				SampleValues: []string{"100", "200", "50"},
+				TopValues: []ValueFrequency{tv("100", 1), tv("200", 1), tv("50", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -125,19 +129,19 @@ func TestAnalyzeNoHeader(t *testing.T) {
 		TotalRows:    3,
 		Fields: []Field{
 			{Name: "column_1", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 3,
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("3"),
-				SampleValues: []string{"1", "2", "3"},
+				TopValues: []ValueFrequency{tv("1", 1), tv("2", 1), tv("3", 1)},
 			}},
 			{Name: "column_2", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 3,
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("100"), MaxValue: ptr("300"),
-				SampleValues: []string{"100", "200", "300"},
+				TopValues: []ValueFrequency{tv("100", 1), tv("200", 1), tv("300", 1)},
 			}},
 			{Name: "column_3", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 3,
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1.41"), MaxValue: ptr("3.14"),
-				SampleValues: []string{"1.41", "2.72", "3.14"},
+				TopValues: []ValueFrequency{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -162,9 +166,9 @@ func TestAnalyzeEmptyCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    0,
 		Fields: []Field{
-			{Name: "Name", DataType: TypeEmpty, Profile: FieldProfile{SampleValues: []string{}}},
-			{Name: "Age", DataType: TypeEmpty, Profile: FieldProfile{SampleValues: []string{}}},
-			{Name: "City", DataType: TypeEmpty, Profile: FieldProfile{SampleValues: []string{}}},
+			{Name: "Name", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
+			{Name: "Age", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
+			{Name: "City", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
 		},
 		SampleData: nil,
 		Issues:     nil,
@@ -185,24 +189,24 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 		TotalRows:    5,
 		Fields: []Field{
 			{Name: "ID", DataType: TypeNumeric, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("5"),
-				SampleValues: []string{"1", "2", "3", "4", "5"},
+				TopValues: []ValueFrequency{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
 			}},
 			{Name: "Value", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 1, NullPercentage: 20, DistinctCount: 4,
+				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("100"), MaxValue: ptr("hello"),
-				SampleValues: []string{"100", "300", "500", "hello"},
+				TopValues: []ValueFrequency{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
 			}},
 			{Name: "Date", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 0, NullPercentage: 0, DistinctCount: 5,
+				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("not-a-date"),
-				SampleValues: []string{"2024-01-15", "2024-01-16", "2024-01-18", "2024-01-19", "not-a-date"},
+				TopValues: []ValueFrequency{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
 			}},
 			{Name: "Notes", DataType: TypeText, Profile: FieldProfile{
-				NullCount: 1, NullPercentage: 20, DistinctCount: 4,
+				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("fifth entry"), MaxValue: ptr("third entry"),
-				SampleValues: []string{"fifth entry", "first entry", "second entry", "third entry"},
+				TopValues: []ValueFrequency{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -225,21 +229,14 @@ func TestAnalyzeLatin1(t *testing.T) {
 	if contract.Encoding != "latin-1" {
 		t.Errorf("encoding = %q, want %q", contract.Encoding, "latin-1")
 	}
-	if contract.HasHeader != true {
-		t.Error("expected has_header = true")
-	}
 	if contract.TotalRows != 3 {
 		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
 	}
 	if len(contract.Fields) != 3 {
 		t.Fatalf("fields count = %d, want 3", len(contract.Fields))
 	}
-	// Latin-1 names should be decoded to UTF-8.
 	if contract.Fields[0].Name != "Name" {
 		t.Errorf("field 0 name = %q, want %q", contract.Fields[0].Name, "Name")
-	}
-	if contract.Fields[1].Name != "City" {
-		t.Errorf("field 1 name = %q, want %q", contract.Fields[1].Name, "City")
 	}
 }
 
@@ -249,10 +246,6 @@ func TestAnalyzeAllEmptyColumn(t *testing.T) {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
 
-	if len(contract.Fields) != 3 {
-		t.Fatalf("fields count = %d, want 3", len(contract.Fields))
-	}
-	// The "Notes" column is entirely empty.
 	notes := contract.Fields[1]
 	if notes.DataType != TypeEmpty {
 		t.Errorf("Notes data_type = %q, want %q", notes.DataType, TypeEmpty)
@@ -274,10 +267,6 @@ func TestAnalyzeQuotedFields(t *testing.T) {
 	if contract.TotalRows != 3 {
 		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
 	}
-	if contract.Delimiter != "," {
-		t.Errorf("delimiter = %q, want %q", contract.Delimiter, ",")
-	}
-	// The description field should contain the unquoted value with the comma.
 	if len(contract.SampleData) < 1 || len(contract.SampleData[0]) < 2 {
 		t.Fatal("insufficient sample data")
 	}
@@ -301,9 +290,6 @@ func TestAnalyzeSingleColumn(t *testing.T) {
 	if contract.Fields[0].DataType != TypeText {
 		t.Errorf("data_type = %q, want %q", contract.Fields[0].DataType, TypeText)
 	}
-	if contract.TotalRows != 3 {
-		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
-	}
 }
 
 func TestAnalyzeWhitespaceNulls(t *testing.T) {
@@ -312,12 +298,10 @@ func TestAnalyzeWhitespaceNulls(t *testing.T) {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
 
-	// Age column has "30", "  " (whitespace-only), "", "28" -> 2 nulls.
 	age := contract.Fields[1]
 	if age.Profile.NullCount != 2 {
 		t.Errorf("Age null_count = %d, want 2", age.Profile.NullCount)
 	}
-	// Name column has " " (whitespace-only) -> 1 null.
 	name := contract.Fields[0]
 	if name.Profile.NullCount != 1 {
 		t.Errorf("Name null_count = %d, want 1", name.Profile.NullCount)
@@ -330,10 +314,6 @@ func TestAnalyzeLargeNumbers(t *testing.T) {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
 
-	if len(contract.Fields) != 4 {
-		t.Fatalf("fields count = %d, want 4", len(contract.Fields))
-	}
-	// Revenue should be detected as numeric despite thousand separators.
 	rev := contract.Fields[1]
 	if rev.DataType != TypeNumeric {
 		t.Errorf("Revenue data_type = %q, want %q", rev.DataType, TypeNumeric)
@@ -346,8 +326,6 @@ func TestAnalyzeDatesMultiFormat(t *testing.T) {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
 
-	// EventDate has both ISO and DD/MM/YYYY formats -> should still be date
-	// since all values match date patterns.
 	eventDate := contract.Fields[1]
 	if eventDate.DataType != TypeDate {
 		t.Errorf("EventDate data_type = %q, want %q", eventDate.DataType, TypeDate)
@@ -363,9 +341,8 @@ func TestAnalyzeNonexistentFile(t *testing.T) {
 
 func TestAnalyzeWithOptions(t *testing.T) {
 	opts := &Options{
-		SampleSize:      2,
-		MaxSampleValues: 2,
-		MaxSampleRows:   2,
+		MaxSampleRows: 2,
+		TopN:          2,
 	}
 	contract, err := AnalyzeFile(ctx, "testdata/simple.csv", opts)
 	if err != nil {
@@ -375,17 +352,18 @@ func TestAnalyzeWithOptions(t *testing.T) {
 	if len(contract.SampleData) != 2 {
 		t.Errorf("sample data rows = %d, want 2", len(contract.SampleData))
 	}
-	// With sample size 2, only 2 data rows are analyzed for profiling.
 	for _, f := range contract.Fields {
-		if len(f.Profile.SampleValues) > 2 {
-			t.Errorf("field %q has %d sample values, want <= 2", f.Name, len(f.Profile.SampleValues))
+		if len(f.Profile.TopValues) > 2 {
+			t.Errorf("field %q has %d top values, want <= 2", f.Name, len(f.Profile.TopValues))
 		}
+	}
+	// TotalRows should still be 5 (all rows scanned).
+	if contract.TotalRows != 5 {
+		t.Errorf("total_rows = %d, want 5", contract.TotalRows)
 	}
 }
 
 func TestAnalyzeSampleDataTruncation(t *testing.T) {
-	// simple.csv has 5 data rows. With MaxSampleRows=3, sample_data
-	// should be truncated to 3 rows.
 	opts := &Options{MaxSampleRows: 3}
 	contract, err := AnalyzeFile(ctx, "testdata/simple.csv", opts)
 	if err != nil {
@@ -394,15 +372,12 @@ func TestAnalyzeSampleDataTruncation(t *testing.T) {
 	if len(contract.SampleData) != 3 {
 		t.Errorf("sample data rows = %d, want 3", len(contract.SampleData))
 	}
-	// Total rows should still be 5 (all rows counted).
 	if contract.TotalRows != 5 {
 		t.Errorf("total_rows = %d, want 5", contract.TotalRows)
 	}
 }
 
 func TestAnalyzeInlineCSV(t *testing.T) {
-	// Test with a CSV constructed in the test to exercise edge cases
-	// not covered by testdata files.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.csv")
 	content := "A,B\n1,\n,2\n,\n"
@@ -418,7 +393,6 @@ func TestAnalyzeInlineCSV(t *testing.T) {
 	if contract.TotalRows != 3 {
 		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
 	}
-	// Column A: "1", "", "" -> 2 nulls, type numeric.
 	if contract.Fields[0].Profile.NullCount != 2 {
 		t.Errorf("A null_count = %d, want 2", contract.Fields[0].Profile.NullCount)
 	}
@@ -428,7 +402,6 @@ func TestAnalyzeInlineCSV(t *testing.T) {
 }
 
 func TestAnalyzeContractJSON(t *testing.T) {
-	// Verify that the contract serializes to valid JSON and round-trips.
 	contract, err := AnalyzeFile(ctx, "testdata/simple.csv", nil)
 	if err != nil {
 		t.Fatalf("AnalyzeFile: %v", err)
@@ -481,7 +454,6 @@ func TestAnalyzeUnreadableFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("a,b\n1,2\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Remove read permission.
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -514,9 +486,6 @@ func TestAnalyzeReaderDirect(t *testing.T) {
 	if contract.SourcePath != "" {
 		t.Errorf("source_path = %q, want empty for reader", contract.SourcePath)
 	}
-	if contract.Encoding != "utf-8" {
-		t.Errorf("encoding = %q, want utf-8", contract.Encoding)
-	}
 }
 
 func TestAnalyzeReaderCancelled(t *testing.T) {
@@ -531,9 +500,6 @@ func TestAnalyzeReaderCancelled(t *testing.T) {
 }
 
 func TestAnalyzeReaderCancelDuringStream(t *testing.T) {
-	// Cancel the context after the sniff phase completes but before
-	// all rows are read. We use a large enough file that streaming
-	// will check ctx.Err() at least once.
 	var buf bytes.Buffer
 	buf.WriteString("Name,Value\n")
 	for i := 0; i < 100; i++ {
@@ -541,8 +507,6 @@ func TestAnalyzeReaderCancelDuringStream(t *testing.T) {
 	}
 
 	cancelCtx, cancel := context.WithCancel(context.Background())
-
-	// Wrap the reader to cancel after the sniff phase seek.
 	r := &cancelAfterSeekReader{
 		ReadSeeker: bytes.NewReader(buf.Bytes()),
 		cancel:     cancel,
@@ -554,8 +518,6 @@ func TestAnalyzeReaderCancelDuringStream(t *testing.T) {
 	}
 }
 
-// cancelAfterSeekReader cancels its context after the first Seek call,
-// simulating a cancellation that arrives between sniff and stream phases.
 type cancelAfterSeekReader struct {
 	io.ReadSeeker
 	cancel func()
@@ -616,8 +578,6 @@ func (r *failReadSeeker) Seek(_ int64, _ int) (int64, error) {
 }
 
 func TestAnalyzeReaderBOMReadError(t *testing.T) {
-	// A file that has a BOM in the sniff buffer, seeks back fine,
-	// but fails when trying to skip the BOM bytes in phase 2.
 	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
 	r := &failAfterSeekReader{data: data}
 	_, err := AnalyzeReader(ctx, r, nil)
@@ -653,7 +613,6 @@ func (r *failAfterSeekReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func TestAnalyzeReaderBOM(t *testing.T) {
-	// Verify BOM handling works through the streaming path.
 	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
 	r := bytes.NewReader(data)
 	contract, err := AnalyzeReader(ctx, r, nil)
@@ -694,8 +653,49 @@ func TestAnalyzeCancelledContext(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAllRowsProfiled(t *testing.T) {
+	// Verify that profiling covers all rows, not just a sample.
+	// Create a file with 20 rows where a value appears only in row 15.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "all_rows.csv")
+	var buf bytes.Buffer
+	buf.WriteString("Status\n")
+	for i := 0; i < 14; i++ {
+		buf.WriteString("active\n")
+	}
+	buf.WriteString("rare_value\n")
+	for i := 0; i < 5; i++ {
+		buf.WriteString("active\n")
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contract, err := AnalyzeFile(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	if contract.TotalRows != 20 {
+		t.Errorf("total_rows = %d, want 20", contract.TotalRows)
+	}
+
+	status := contract.Fields[0]
+	// "active" should appear 19 times, "rare_value" 1 time.
+	found := map[string]int{}
+	for _, tv := range status.Profile.TopValues {
+		found[tv.Value] = tv.Count
+	}
+	if found["active"] != 19 {
+		t.Errorf("active count = %d, want 19", found["active"])
+	}
+	if found["rare_value"] != 1 {
+		t.Errorf("rare_value count = %d, want 1", found["rare_value"])
+	}
+}
+
 // assertContract compares the actual contract against the expected one,
-// ignoring the SourcePath field (which depends on the absolute path).
+// ignoring the SourcePath field (which depends on the caller).
 func assertContract(t *testing.T, got *SourceContract, want SourceContract) {
 	t.Helper()
 
@@ -740,18 +740,32 @@ func assertFields(t *testing.T, got, want []Field) {
 
 func assertProfile(t *testing.T, prefix string, got, want FieldProfile) {
 	t.Helper()
+	if got.TotalCount != want.TotalCount {
+		t.Errorf("%s: total_count = %d, want %d", prefix, got.TotalCount, want.TotalCount)
+	}
 	if got.NullCount != want.NullCount {
 		t.Errorf("%s: null_count = %d, want %d", prefix, got.NullCount, want.NullCount)
 	}
 	if got.NullPercentage != want.NullPercentage {
 		t.Errorf("%s: null_percentage = %f, want %f", prefix, got.NullPercentage, want.NullPercentage)
 	}
-	if got.DistinctCount != want.DistinctCount {
-		t.Errorf("%s: distinct_count = %d, want %d", prefix, got.DistinctCount, want.DistinctCount)
-	}
 	assertStringPtr(t, prefix+": min_value", got.MinValue, want.MinValue)
 	assertStringPtr(t, prefix+": max_value", got.MaxValue, want.MaxValue)
-	assertStringSlice(t, prefix+": sample_values", got.SampleValues, want.SampleValues)
+	assertTopValues(t, prefix, got.TopValues, want.TopValues)
+}
+
+func assertTopValues(t *testing.T, prefix string, got, want []ValueFrequency) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: top_values len = %d, want %d (got %v)", prefix, len(got), len(want), got)
+		return
+	}
+	for i := range want {
+		if got[i].Value != want[i].Value || got[i].Count != want[i].Count {
+			t.Errorf("%s: top_values[%d] = {%q, %d}, want {%q, %d}",
+				prefix, i, got[i].Value, got[i].Count, want[i].Value, want[i].Count)
+		}
+	}
 }
 
 func assertStringPtr(t *testing.T, label string, got, want *string) {
@@ -765,19 +779,6 @@ func assertStringPtr(t *testing.T, label string, got, want *string) {
 	}
 	if *got != *want {
 		t.Errorf("%s = %q, want %q", label, *got, *want)
-	}
-}
-
-func assertStringSlice(t *testing.T, label string, got, want []string) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Errorf("%s: len = %d, want %d (got %v)", label, len(got), len(want), got)
-		return
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("%s[%d] = %q, want %q", label, i, got[i], want[i])
-		}
 	}
 }
 

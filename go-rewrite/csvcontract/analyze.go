@@ -38,13 +38,14 @@ func AnalyzeFile(ctx context.Context, path string, opts *Options) (*SourceContra
 //
 //  1. Sniff: read the first 8KB to detect encoding and delimiter, then
 //     seek back to the start.
-//  2. Stream: single sequential pass through the CSV reader. The first
-//     row is used for header detection. Up to SampleSize data rows are
-//     kept in memory for type inference and profiling. All remaining
-//     rows are counted but not stored.
+//  2. Stream: single sequential pass through all rows. The first row is
+//     used for header detection. Every data row is fed to per-column
+//     profilers (type inference, null counting, frequency tracking,
+//     min/max). Up to MaxSampleRows are kept for the SampleData field.
 //
-// Peak memory is proportional to SampleSize (default 1000 rows), not
-// the file size. A 2GB file uses a few MB of RAM.
+// Peak memory is bounded by MaxTracked (default 10,000) distinct values
+// per column plus MaxSampleRows (default 5) stored rows, regardless of
+// file size.
 func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*SourceContract, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -60,8 +61,6 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 
 	encoding, hasBOM := detectEncodingFromBytes(sniffBuf)
 
-	// Detect delimiter from the sniff buffer (already decoded for UTF-8,
-	// needs decoding for Latin-1).
 	delimBuf := sniffBuf
 	if hasBOM {
 		delimBuf = bytes.TrimPrefix(delimBuf, utf8BOM)
@@ -80,7 +79,6 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 	// Phase 2: stream through the CSV content.
 	var csvReader io.Reader = rs
 	if hasBOM {
-		// Skip the 3-byte BOM before feeding to the CSV parser.
 		bomBuf := make([]byte, len(utf8BOM))
 		if _, err := io.ReadFull(rs, bomBuf); err != nil {
 			return nil, fmt.Errorf("skip BOM: %w", err)
@@ -108,9 +106,10 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 	return result, nil
 }
 
-// streamAnalyze does a single sequential pass over the CSV content,
-// collecting header, sample rows, type inference, profiling, and total
-// row count. Only SampleSize rows are held in memory.
+// streamAnalyze does a single sequential pass over all CSV rows. Every
+// row is fed to per-column profilers for type inference, null counting,
+// frequency tracking, and min/max. Only MaxSampleRows rows are stored
+// in memory for the SampleData output.
 func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Options) (*SourceContract, error) {
 	reader := csvstd.NewReader(r)
 	reader.Comma = delimiter
@@ -126,9 +125,12 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 	hasHeader := detectHeader(firstRow)
 
 	var fieldNames []string
-	var sampleRows [][]string
+	maxSampleRows := opts.maxSampleRows()
+	maxTracked := opts.maxTracked()
 
-	sampleSize := opts.sampleSize()
+	// Track whether the first row is data (no header) so we can
+	// feed it to the profilers and include it in sample data.
+	var firstDataRow []string
 
 	if hasHeader {
 		fieldNames = firstRow
@@ -141,12 +143,32 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		if len(firstRow) > 0 {
 			fieldNames = generateFieldNames(len(firstRow))
 		}
-		// First row is data, not a header -- include it in the sample.
-		sampleRows = append(sampleRows, firstRow)
+		firstDataRow = firstRow
 	}
 
-	// Stream remaining rows: keep up to sampleSize in memory, count the rest.
-	totalRows := len(sampleRows)
+	numFields := len(fieldNames)
+
+	// Initialize per-column profilers and type trackers.
+	profilers := make([]*columnProfiler, numFields)
+	colTypes := make([]DataType, numFields)
+	for i := range profilers {
+		profilers[i] = newColumnProfiler(maxTracked)
+		colTypes[i] = TypeEmpty
+	}
+
+	// If the first row is data, process it.
+	var sampleRows [][]string
+	totalRows := 0
+
+	if firstDataRow != nil {
+		totalRows++
+		observeRow(firstDataRow, profilers, colTypes, numFields)
+		if len(sampleRows) < maxSampleRows {
+			sampleRows = append(sampleRows, firstDataRow)
+		}
+	}
+
+	// Stream all remaining rows.
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -157,48 +179,39 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 			break
 		}
 		totalRows++
-		if len(sampleRows) < sampleSize {
+		observeRow(record, profilers, colTypes, numFields)
+		if len(sampleRows) < maxSampleRows {
 			sampleRows = append(sampleRows, record)
 		}
 	}
 
-	numFields := len(fieldNames)
-
-	// Use the sample rows for type inference and profiling.
-	columnTypes := inferColumnTypes(sampleRows, numFields)
-
+	topN := opts.topN()
 	fields := make([]Field, numFields)
 	for i, name := range fieldNames {
-		colValues := extractColumn(sampleRows, i)
 		fields[i] = Field{
 			Name:     name,
-			DataType: columnTypes[i],
-			Profile:  profileColumn(colValues, opts.maxSampleValues()),
+			DataType: colTypes[i],
+			Profile:  profilers[i].finish(topN),
 		}
-	}
-
-	maxSampleRows := opts.maxSampleRows()
-	sampleData := sampleRows
-	if len(sampleData) > maxSampleRows {
-		sampleData = sampleData[:maxSampleRows]
 	}
 
 	return &SourceContract{
 		HasHeader:  hasHeader,
 		TotalRows:  totalRows,
 		Fields:     fields,
-		SampleData: sampleData,
+		SampleData: sampleRows,
 	}, nil
 }
 
-// extractColumn collects all values for a single column index from the
-// data rows. If a row is shorter than the index, an empty string is used.
-func extractColumn(rows [][]string, col int) []string {
-	values := make([]string, len(rows))
-	for i, row := range rows {
+// observeRow feeds a single row to per-column profilers and type trackers.
+func observeRow(row []string, profilers []*columnProfiler, colTypes []DataType, numFields int) {
+	for col := 0; col < numFields; col++ {
+		var value string
 		if col < len(row) {
-			values[i] = row[col]
+			value = row[col]
 		}
+		profilers[col].observe(value)
+		cellType := classifyCell(value)
+		colTypes[col] = mergeTypes(colTypes[col], cellType)
 	}
-	return values
 }
