@@ -24,12 +24,18 @@ type Field struct {
 
 // FieldProfile contains statistical observations about a column's values.
 type FieldProfile struct {
-	NullCount      int      `json:"null_count"`
-	NullPercentage float64  `json:"null_percentage"`
-	DistinctCount  int      `json:"distinct_count"`
-	MinValue       *string  `json:"min_value"`
-	MaxValue       *string  `json:"max_value"`
-	SampleValues   []string `json:"sample_values"`
+	TotalCount     int              `json:"total_count"`
+	NullCount      int              `json:"null_count"`
+	NullPercentage float64          `json:"null_percentage"`
+	MinValue       *string          `json:"min_value"`
+	MaxValue       *string          `json:"max_value"`
+	TopValues      []ValueFrequency `json:"top_values"`
+}
+
+// ValueFrequency pairs a value with how many times it appears.
+type ValueFrequency struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
 }
 
 // DataType represents the inferred type of a CSV column.
@@ -44,31 +50,33 @@ const (
 
 // Options controls the analysis behavior. A nil Options uses defaults.
 type Options struct {
-	// SampleSize is the maximum number of data rows to read for type
-	// inference and profiling. Zero means use the default (1000).
-	SampleSize int
+	// TopN is the number of most frequent values to include per field.
+	// Zero means use the default (10).
+	TopN int
 
-	// MaxSampleValues is the maximum number of distinct sample values
-	// to include per field. Zero means use the default (5).
-	MaxSampleValues int
+	// MaxTracked is the maximum number of distinct values tracked per
+	// column for frequency counting. Once exceeded, new values are
+	// ignored but existing counters keep incrementing. Zero means use
+	// the default (10000).
+	MaxTracked int
 
 	// MaxSampleRows is the maximum number of rows to include in
 	// SampleData. Zero means use the default (5).
 	MaxSampleRows int
 }
 
-func (o *Options) sampleSize() int {
-	if o == nil || o.SampleSize <= 0 {
-		return 1000
+func (o *Options) topN() int {
+	if o == nil || o.TopN <= 0 {
+		return 10
 	}
-	return o.SampleSize
+	return o.TopN
 }
 
-func (o *Options) maxSampleValues() int {
-	if o == nil || o.MaxSampleValues <= 0 {
-		return 5
+func (o *Options) maxTracked() int {
+	if o == nil || o.MaxTracked <= 0 {
+		return 10000
 	}
-	return o.MaxSampleValues
+	return o.MaxTracked
 }
 
 func (o *Options) maxSampleRows() int {

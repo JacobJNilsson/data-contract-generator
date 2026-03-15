@@ -7,47 +7,93 @@ import (
 	"strings"
 )
 
-// profileColumn computes statistics for a single column across all data rows.
-func profileColumn(values []string, maxSamples int) FieldProfile {
-	total := len(values)
-	if total == 0 {
-		return FieldProfile{SampleValues: []string{}}
+// columnProfiler collects statistics for a single column incrementally,
+// one value at a time. It tracks null counts, min/max, and a capped
+// frequency map for the top-N most common values.
+type columnProfiler struct {
+	totalCount int
+	nullCount  int
+	freqs      map[string]int
+	maxTracked int
+	capped     bool
+	tracker    rangeTracker
+}
+
+// newColumnProfiler creates a profiler that tracks up to maxTracked
+// distinct values for frequency counting.
+func newColumnProfiler(maxTracked int) *columnProfiler {
+	return &columnProfiler{
+		freqs:      make(map[string]int),
+		maxTracked: maxTracked,
+	}
+}
+
+// observe records a single cell value.
+func (p *columnProfiler) observe(value string) {
+	p.totalCount++
+
+	if isNull(value) {
+		p.nullCount++
+		return
 	}
 
-	nullCount := 0
-	distinct := map[string]struct{}{}
+	p.tracker.observe(value)
 
-	// Track min/max incrementally to avoid allocating a separate slice.
-	var tracker rangeTracker
-
-	for _, v := range values {
-		if isNull(v) {
-			nullCount++
-			continue
-		}
-		distinct[v] = struct{}{}
-		tracker.observe(v)
+	if count, exists := p.freqs[value]; exists {
+		p.freqs[value] = count + 1
+	} else if len(p.freqs) < p.maxTracked {
+		p.freqs[value] = 1
+	} else {
+		p.capped = true
 	}
+}
 
+// finish computes the final FieldProfile from the accumulated state.
+func (p *columnProfiler) finish(topN int) FieldProfile {
 	var minVal, maxVal *string
-	if tracker.seen {
-		minVal = &tracker.min
-		maxVal = &tracker.max
+	if p.tracker.seen {
+		minVal = &p.tracker.min
+		maxVal = &p.tracker.max
 	}
 
-	pct := 0.0
-	if total > 0 {
-		pct = math.Round(float64(nullCount)/float64(total)*10000) / 100
+	nullPct := 0.0
+	if p.totalCount > 0 {
+		nullPct = math.Round(float64(p.nullCount)/float64(p.totalCount)*10000) / 100
 	}
 
 	return FieldProfile{
-		NullCount:      nullCount,
-		NullPercentage: pct,
-		DistinctCount:  len(distinct),
+		TotalCount:     p.totalCount,
+		NullCount:      p.nullCount,
+		NullPercentage: nullPct,
 		MinValue:       minVal,
 		MaxValue:       maxVal,
-		SampleValues:   sampleDistinct(distinct, maxSamples),
+		TopValues:      p.topValues(topN),
 	}
+}
+
+// topValues returns the topN most frequent values, sorted by count
+// descending, then by value ascending for stable ordering.
+func (p *columnProfiler) topValues(topN int) []ValueFrequency {
+	if len(p.freqs) == 0 {
+		return []ValueFrequency{}
+	}
+
+	entries := make([]ValueFrequency, 0, len(p.freqs))
+	for v, c := range p.freqs {
+		entries = append(entries, ValueFrequency{Value: v, Count: c})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Count != entries[j].Count {
+			return entries[i].Count > entries[j].Count
+		}
+		return entries[i].Value < entries[j].Value
+	})
+
+	if len(entries) > topN {
+		entries = entries[:topN]
+	}
+	return entries
 }
 
 // rangeTracker tracks the minimum and maximum values seen so far,
@@ -185,20 +231,4 @@ func parseNumeric(s string) (float64, bool) {
 	}
 
 	return 0, false
-}
-
-// sampleDistinct returns up to maxSamples sorted distinct values.
-func sampleDistinct(distinct map[string]struct{}, maxSamples int) []string {
-	if len(distinct) == 0 {
-		return []string{}
-	}
-	vals := make([]string, 0, len(distinct))
-	for v := range distinct {
-		vals = append(vals, v)
-	}
-	sort.Strings(vals)
-	if len(vals) > maxSamples {
-		vals = vals[:maxSamples]
-	}
-	return vals
 }
