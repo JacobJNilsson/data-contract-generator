@@ -1,6 +1,7 @@
 package csvcontract
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -15,7 +16,7 @@ func TestDetectEncodingUTF8(t *testing.T) {
 }
 
 func TestDetectEncodingBOM(t *testing.T) {
-	data := append(utf8BOM, []byte("hello,world\n")...)
+	data := slices.Concat(utf8BOM, []byte("hello,world\n"))
 	enc, bom := detectEncodingFromBytes(data)
 	if enc != "utf-8" {
 		t.Errorf("encoding = %q, want utf-8", enc)

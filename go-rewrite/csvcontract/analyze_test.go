@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -578,7 +579,7 @@ func (r *failReadSeeker) Seek(_ int64, _ int) (int64, error) {
 }
 
 func TestAnalyzeReaderBOMReadError(t *testing.T) {
-	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
+	data := slices.Concat(utf8BOM, []byte("Name,Value\nAlice,1\n"))
 	r := &failAfterSeekReader{data: data}
 	_, err := AnalyzeReader(ctx, r, nil)
 	if err == nil {
@@ -613,7 +614,7 @@ func (r *failAfterSeekReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func TestAnalyzeReaderBOM(t *testing.T) {
-	data := append(utf8BOM, []byte("Name,Value\nAlice,1\n")...)
+	data := slices.Concat(utf8BOM, []byte("Name,Value\nAlice,1\n"))
 	r := bytes.NewReader(data)
 	contract, err := AnalyzeReader(ctx, r, nil)
 	if err != nil {

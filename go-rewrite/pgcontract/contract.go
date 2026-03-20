@@ -63,6 +63,7 @@ type FieldConstraint struct {
 // ConstraintType enumerates the supported constraint types.
 type ConstraintType string
 
+// Supported constraint types for PostgreSQL columns.
 const (
 	ConstraintNotNull    ConstraintType = "not_null"
 	ConstraintUnique     ConstraintType = "unique"
