@@ -1,22 +1,27 @@
 // Package pgcontract analyzes PostgreSQL database schemas and produces
-// destination contracts describing table structures, types, and constraints.
+// contracts describing table structures, types, and constraints. The AI
+// agent uses these contracts to decide which table to ingest data into
+// or extract data from.
 package pgcontract
 
-// DestinationContract is the complete analysis result for a PostgreSQL table.
-type DestinationContract struct {
-	ContractType    string            `json:"contract_type"`
-	DestinationID   string            `json:"destination_id"`
-	Schema          DestinationSchema `json:"schema"`
+// DatabaseContract is the complete analysis of a PostgreSQL database,
+// containing every table in the target schema.
+type DatabaseContract struct {
+	ContractType string          `json:"contract_type"`
+	DatabaseID   string          `json:"database_id"`
+	Tables       []TableContract `json:"tables"`
+	Metadata     map[string]any  `json:"metadata,omitempty"`
+}
+
+// TableContract describes a single table: its columns, types, and constraints.
+type TableContract struct {
+	TableName       string            `json:"table_name"`
+	Schema          string            `json:"schema"`
+	Fields          []FieldDefinition `json:"fields"`
 	ValidationRules ValidationRules   `json:"validation_rules"`
-	Metadata        map[string]any    `json:"metadata,omitempty"`
 }
 
-// DestinationSchema defines the structure of the destination table.
-type DestinationSchema struct {
-	Fields []FieldDefinition `json:"fields"`
-}
-
-// FieldDefinition describes a single column in the table.
+// FieldDefinition describes a single column in a table.
 type FieldDefinition struct {
 	Name        string            `json:"name"`
 	DataType    string            `json:"data_type"`
@@ -25,7 +30,7 @@ type FieldDefinition struct {
 	Constraints []FieldConstraint `json:"constraints,omitempty"`
 }
 
-// FieldConstraint represents a constraint on a field.
+// FieldConstraint represents a constraint on a column.
 type FieldConstraint struct {
 	Type           ConstraintType `json:"type"`
 	Value          any            `json:"value,omitempty"`
@@ -33,7 +38,7 @@ type FieldConstraint struct {
 	ReferredColumn *string        `json:"referred_column,omitempty"`
 }
 
-// ConstraintType represents the type of constraint.
+// ConstraintType enumerates the supported constraint types.
 type ConstraintType string
 
 const (
@@ -44,18 +49,18 @@ const (
 	ConstraintCheck      ConstraintType = "check"
 )
 
-// ValidationRules defines validation requirements for the destination.
+// ValidationRules summarises the table-level validation requirements.
 type ValidationRules struct {
 	RequiredFields    []string `json:"required_fields,omitempty"`
 	UniqueConstraints []string `json:"unique_constraints,omitempty"`
 }
 
-// Options controls the analysis behavior.
+// Options controls the analysis behaviour.
 type Options struct {
-	// Schema is the PostgreSQL schema to analyze (default: "public")
+	// Schema is the PostgreSQL schema to analyze (default: "public").
 	Schema string
 
-	// IncludeComments includes PostgreSQL column comments as descriptions
+	// IncludeComments includes PostgreSQL column comments as field descriptions.
 	IncludeComments bool
 }
 
