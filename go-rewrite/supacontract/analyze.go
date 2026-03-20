@@ -190,7 +190,7 @@ func buildTable(name string, def schemaObject) TableContract {
 		fields = append(fields, field)
 	}
 
-	rules := buildRules(fields, requiredSet)
+	rules := buildRules(fields)
 
 	return TableContract{
 		TableName:       name,
@@ -295,7 +295,7 @@ func mapOpenAPIType(prop propertyObject) string {
 }
 
 // buildRules creates validation rules from fields.
-func buildRules(fields []FieldDefinition, requiredSet map[string]bool) ValidationRules {
+func buildRules(fields []FieldDefinition) ValidationRules {
 	var rules ValidationRules
 	for _, f := range fields {
 		if !f.Nullable {

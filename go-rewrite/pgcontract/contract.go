@@ -55,7 +55,6 @@ type TopValue struct {
 // FieldConstraint represents a constraint on a column.
 type FieldConstraint struct {
 	Type           ConstraintType `json:"type"`
-	Value          any            `json:"value,omitempty"`
 	ReferredTable  *string        `json:"referred_table,omitempty"`
 	ReferredColumn *string        `json:"referred_column,omitempty"`
 }
@@ -68,7 +67,6 @@ const (
 	ConstraintUnique     ConstraintType = "unique"
 	ConstraintPrimaryKey ConstraintType = "primary_key"
 	ConstraintForeignKey ConstraintType = "foreign_key"
-	ConstraintCheck      ConstraintType = "check"
 )
 
 // ValidationRules summarises the table-level validation requirements.

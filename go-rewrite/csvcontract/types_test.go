@@ -251,17 +251,3 @@ func TestTypePriorityUnknown(t *testing.T) {
 		t.Error("unknown type should have priority 0")
 	}
 }
-
-func TestInferColumnTypes(t *testing.T) {
-	rows := [][]string{
-		{"hello", "123", "2024-01-01", ""},
-		{"world", "456", "2024-02-02", ""},
-	}
-	types := inferColumnTypes(rows, 4)
-	expected := []DataType{TypeText, TypeNumeric, TypeDate, TypeEmpty}
-	for i, want := range expected {
-		if types[i] != want {
-			t.Errorf("column %d: got %q, want %q", i, types[i], want)
-		}
-	}
-}

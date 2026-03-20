@@ -4,26 +4,6 @@ import (
 	"strings"
 )
 
-// inferColumnTypes determines the data type for each column by examining
-// all data rows. The priority order for resolving mixed-type columns is:
-// text > date > numeric > empty. If any row has text in a column, the
-// column is text. If any row has a date (and no text), it's date. Etc.
-func inferColumnTypes(dataRows [][]string, numFields int) []DataType {
-	types := make([]DataType, numFields)
-	for i := range types {
-		types[i] = TypeEmpty
-	}
-
-	for _, row := range dataRows {
-		for col := 0; col < numFields && col < len(row); col++ {
-			cellType := classifyCell(row[col])
-			types[col] = mergeTypes(types[col], cellType)
-		}
-	}
-
-	return types
-}
-
 // classifyCell determines the type of a single cell value.
 func classifyCell(value string) DataType {
 	trimmed := strings.TrimSpace(value)
