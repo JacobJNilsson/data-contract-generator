@@ -1,14 +1,22 @@
-MIN_COVERAGE := 100
+PG_CONTAINER := contract-gen-pg-test
+PG_PORT      := 5439
+PG_CONN      := postgres://postgres:postgres@localhost:$(PG_PORT)/postgres
 
-.PHONY: build test lint vet tidy check clean
+.PHONY: build test lint vet tidy check clean setup db-start db-stop
 
 build:
 	go build ./...
 
-test:
-	go test -race -coverprofile=coverage.out ./...
+test: db-start
+	go test -race -coverprofile=coverage.out ./csvcontract/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
-		awk -v min=$(MIN_COVERAGE) '{if ($$1+0 < min) {printf "Coverage %.1f%% < %d%% minimum\n", $$1, min; exit 1} else {printf "Coverage: %.1f%%\n", $$1}}'
+		awk '{if ($$1+0 < 100) {printf "FAIL csvcontract %.1f%% < 100%%\n", $$1; exit 1} else {printf "csvcontract: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./supacontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 95) {printf "FAIL supacontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "supacontract: %.1f%%\n", $$1}}'
+	TEST_PG_CONN=$(PG_CONN) go test -race -coverprofile=coverage.out ./pgcontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 85) {printf "FAIL pgcontract %.1f%% < 85%%\n", $$1; exit 1} else {printf "pgcontract: %.1f%%\n", $$1}}'
 
 lint:
 	golangci-lint run ./...
@@ -21,8 +29,21 @@ tidy:
 
 check: tidy vet lint test build
 
+# Start Postgres if not already running. Reuse across test runs.
+db-start:
+	@docker inspect $(PG_CONTAINER) >/dev/null 2>&1 && \
+		docker start $(PG_CONTAINER) >/dev/null 2>&1 || \
+		docker run --name $(PG_CONTAINER) \
+			-e POSTGRES_PASSWORD=postgres \
+			-p $(PG_PORT):5432 \
+			-d postgres:17-alpine >/dev/null 2>&1
+	@until docker exec $(PG_CONTAINER) pg_isready -U postgres >/dev/null 2>&1; do sleep 0.2; done
+
+db-stop:
+	@docker stop $(PG_CONTAINER) >/dev/null 2>&1 || true
+
 setup:
 	git config core.hooksPath go-rewrite/.githooks
 
-clean:
+clean: db-stop
 	rm -rf coverage.out

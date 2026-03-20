@@ -271,6 +271,141 @@ func TestBuildValidationRules(t *testing.T) {
 	}
 }
 
+func TestTopNValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		freqs map[string]int
+		n     int
+		want  []TopValue
+	}{
+		{
+			name:  "empty",
+			freqs: map[string]int{},
+			n:     5,
+			want:  nil,
+		},
+		{
+			name:  "nil",
+			freqs: nil,
+			n:     5,
+			want:  nil,
+		},
+		{
+			name:  "top 2 of 3",
+			freqs: map[string]int{"a": 10, "b": 5, "c": 1},
+			n:     2,
+			want:  []TopValue{{Value: "a", Count: 10}, {Value: "b", Count: 5}},
+		},
+		{
+			name:  "n larger than map",
+			freqs: map[string]int{"x": 3},
+			n:     5,
+			want:  []TopValue{{Value: "x", Count: 3}},
+		},
+		{
+			name:  "tie broken by key ascending",
+			freqs: map[string]int{"b": 5, "a": 5},
+			n:     2,
+			want:  []TopValue{{Value: "a", Count: 5}, {Value: "b", Count: 5}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := topNValues(tt.freqs, tt.n)
+			if tt.want == nil && got != nil {
+				t.Errorf("topNValues() = %v, want nil", got)
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("topNValues() len = %d, want %d", len(got), len(tt.want))
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("topNValues()[%d] = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestOptions_sampleSize(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want int
+	}{
+		{"nil", nil, 10000},
+		{"zero", &Options{SampleSize: 0}, 10000},
+		{"custom", &Options{SampleSize: 500}, 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.opts.sampleSize(); got != tt.want {
+				t.Errorf("sampleSize() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptions_batchSize(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want int
+	}{
+		{"nil", nil, 1000},
+		{"zero", &Options{BatchSize: 0}, 1000},
+		{"custom", &Options{BatchSize: 200}, 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.opts.batchSize(); got != tt.want {
+				t.Errorf("batchSize() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptions_maxSampleRows(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want int
+	}{
+		{"nil", nil, 5},
+		{"zero", &Options{MaxSampleRows: 0}, 5},
+		{"custom", &Options{MaxSampleRows: 10}, 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.opts.maxSampleRows(); got != tt.want {
+				t.Errorf("maxSampleRows() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptions_topN(t *testing.T) {
+	tests := []struct {
+		name string
+		opts *Options
+		want int
+	}{
+		{"nil", nil, 5},
+		{"zero", &Options{TopN: 0}, 5},
+		{"custom", &Options{TopN: 3}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.opts.topN(); got != tt.want {
+				t.Errorf("topN() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 // Helper functions
 
 func strPtr(s string) *string {

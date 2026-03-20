@@ -134,38 +134,6 @@ contract-gen --help
 - Comprehensive validation with detailed error messages
 - Batch processing support
 
-## Three-Contract Architecture
-
-### 1. Source Contracts
-
-Describe where data comes from. Automatically analyzes and documents:
-
-- **File sources**: CSV, JSON, and other file formats with encoding detection
-- **Database sources**: PostgreSQL, MySQL, SQLite tables and queries
-- Schema inference with data types
-- Quality metrics and data profiling
-- Format-specific handling (UTF-8 BOM, European numbers, etc.)
-
-### 2. Destination Contracts
-
-Define where data goes. Specifies:
-
-- Target schema and data types
-- Validation rules and constraints
-- Required fields and uniqueness constraints
-- Data quality requirements
-
-### 3. Transformation Contracts
-
-Map source to destination. Defines:
-
-- Field mappings between source and destination
-- Transformation logic (type conversions, formatting)
-- Enrichment rules (derived fields, lookups)
-- Execution configuration (batch size, error handling)
-
-See the [Core documentation](core/README.md) for detailed usage and examples.
-
 ## AI Integration (MCP Server)
 
 This tool also functions as an MCP (Model Context Protocol) server, making its capabilities available to AI assistants like Cursor.

@@ -86,23 +86,86 @@ func TestExtractProjectRef(t *testing.T) {
 }
 
 func TestExtractTableNames(t *testing.T) {
-	paths := map[string]any{
-		"/users":   nil,
-		"/orders":  nil,
-		"/rpc/foo": nil,
-		"/rpc/bar": nil,
+	tests := []struct {
+		name  string
+		paths map[string]any
+		want  []string
+	}{
+		{
+			name: "normal tables and rpc",
+			paths: map[string]any{
+				"/users":   nil,
+				"/orders":  nil,
+				"/rpc/foo": nil,
+				"/rpc/bar": nil,
+			},
+			want: []string{"orders", "users"},
+		},
+		{
+			name:  "empty paths",
+			paths: map[string]any{},
+			want:  nil,
+		},
+		{
+			name: "paths without slash prefix are skipped",
+			paths: map[string]any{
+				"no_slash": nil,
+				"/valid":   nil,
+			},
+			want: []string{"valid"},
+		},
+		{
+			name: "nested paths are skipped",
+			paths: map[string]any{
+				"/a/b": nil,
+				"/c":   nil,
+			},
+			want: []string{"c"},
+		},
+		{
+			name: "root path skipped",
+			paths: map[string]any{
+				"/": nil,
+			},
+			want: nil,
+		},
 	}
 
-	got := extractTableNames(paths)
-	want := []string{"orders", "users"}
-
-	if len(got) != len(want) {
-		t.Fatalf("extractTableNames() = %v, want %v", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTableNames(tt.paths)
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractTableNames() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("extractTableNames()[%d] = %q, want %q", i, got[i], want[i])
-		}
+}
+
+func TestParseTables_MissingDefinition(t *testing.T) {
+	// Table in paths but not in definitions should be skipped
+	spec := openAPISpec{
+		Paths: map[string]any{
+			"/exists":  nil,
+			"/missing": nil,
+		},
+		Definitions: map[string]schemaObject{
+			"exists": {Properties: map[string]propertyObject{
+				"id": {Type: "integer", Format: "integer"},
+			}},
+		},
+	}
+
+	tables := parseTables(&spec)
+	if len(tables) != 1 {
+		t.Fatalf("got %d tables, want 1", len(tables))
+	}
+	if tables[0].TableName != "exists" {
+		t.Errorf("table = %q, want exists", tables[0].TableName)
 	}
 }
 
@@ -197,10 +260,7 @@ func TestBuildField_Nullable(t *testing.T) {
 func TestParseTables(t *testing.T) {
 	spec := sampleOpenAPISpec()
 
-	tables, err := parseTables(&spec)
-	if err != nil {
-		t.Fatalf("parseTables() error = %v", err)
-	}
+	tables := parseTables(&spec)
 
 	if len(tables) != 2 {
 		t.Fatalf("got %d tables, want 2", len(tables))
@@ -240,35 +300,94 @@ func TestParseTables(t *testing.T) {
 	}
 }
 
-func TestAnalyzeDatabase_MockServer(t *testing.T) {
-	spec := sampleOpenAPISpec()
-
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify auth headers
+// newTestServer returns an httptest server that serves the given OpenAPI spec.
+// It verifies auth headers are present.
+func newTestServer(spec openAPISpec) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("apikey") == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			http.Error(w, `{"message":"No API key found"}`, http.StatusUnauthorized)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(spec)
 	}))
+}
+
+func TestAnalyzeFromURL_Success(t *testing.T) {
+	ts := newTestServer(sampleOpenAPISpec())
 	defer ts.Close()
 
-	// Override http.DefaultClient for the test to trust the test server's TLS
-	origClient := http.DefaultClient
-	http.DefaultClient = ts.Client()
-	defer func() { http.DefaultClient = origClient }()
-
-	// The test server URL doesn't end in .supabase.co, so we need to
-	// bypass validation. Test the core parsing via parseTables instead.
-	tables, err := parseTables(&spec)
+	contract, err := analyzeFromURL(context.Background(), ts.URL, "test-key", "test-project")
 	if err != nil {
-		t.Fatalf("parseTables() error = %v", err)
+		t.Fatalf("analyzeFromURL() error = %v", err)
 	}
 
-	if len(tables) != 2 {
-		t.Fatalf("got %d tables, want 2", len(tables))
+	if contract.ContractType != "destination" {
+		t.Errorf("ContractType = %q, want destination", contract.ContractType)
+	}
+	if contract.DatabaseID != "test-project" {
+		t.Errorf("DatabaseID = %q, want test-project", contract.DatabaseID)
+	}
+	if len(contract.Tables) != 2 {
+		t.Fatalf("got %d tables, want 2", len(contract.Tables))
+	}
+	if contract.Metadata["table_count"] != 2 {
+		t.Errorf("table_count = %v, want 2", contract.Metadata["table_count"])
+	}
+}
+
+func TestAnalyzeFromURL_Unauthorized(t *testing.T) {
+	ts := newTestServer(sampleOpenAPISpec())
+	defer ts.Close()
+
+	// Empty apikey header triggers 401 from our test server
+	_, err := analyzeFromURL(context.Background(), ts.URL, "", "test")
+	if err == nil {
+		t.Fatal("expected error for empty API key")
+	}
+}
+
+func TestAnalyzeFromURL_ServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	_, err := analyzeFromURL(context.Background(), ts.URL, "key", "test")
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestAnalyzeFromURL_Forbidden(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	_, err := analyzeFromURL(context.Background(), ts.URL, "key", "test")
+	if err == nil {
+		t.Fatal("expected error for 403 response")
+	}
+}
+
+func TestAnalyzeFromURL_BadJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{not json`))
+	}))
+	defer ts.Close()
+
+	_, err := analyzeFromURL(context.Background(), ts.URL, "key", "test")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestAnalyzeFromURL_ConnectionRefused(t *testing.T) {
+	_, err := analyzeFromURL(context.Background(), "http://127.0.0.1:1", "key", "test")
+	if err == nil {
+		t.Fatal("expected error for connection refused")
 	}
 }
 
