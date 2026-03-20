@@ -75,14 +75,14 @@ func (p *columnProfiler) finish(topN int) FieldProfile {
 
 // topValues returns the topN most frequent values, sorted by count
 // descending, then by value ascending for stable ordering.
-func (p *columnProfiler) topValues(topN int) []ValueFrequency {
+func (p *columnProfiler) topValues(topN int) []TopValue {
 	if len(p.freqs) == 0 {
-		return []ValueFrequency{}
+		return []TopValue{}
 	}
 
-	entries := make([]ValueFrequency, 0, len(p.freqs))
+	entries := make([]TopValue, 0, len(p.freqs))
 	for v, c := range p.freqs {
-		entries = append(entries, ValueFrequency{Value: v, Count: c})
+		entries = append(entries, TopValue{Value: v, Count: c})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {

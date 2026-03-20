@@ -24,16 +24,16 @@ type Field struct {
 
 // FieldProfile contains statistical observations about a column's values.
 type FieldProfile struct {
-	TotalCount     int              `json:"total_count"`
-	NullCount      int              `json:"null_count"`
-	NullPercentage float64          `json:"null_percentage"`
-	MinValue       *string          `json:"min_value"`
-	MaxValue       *string          `json:"max_value"`
-	TopValues      []ValueFrequency `json:"top_values"`
+	TotalCount     int        `json:"total_count"`
+	NullCount      int        `json:"null_count"`
+	NullPercentage float64    `json:"null_percentage"`
+	MinValue       *string    `json:"min_value"`
+	MaxValue       *string    `json:"max_value"`
+	TopValues      []TopValue `json:"top_values"`
 }
 
-// ValueFrequency pairs a value with how many times it appears.
-type ValueFrequency struct {
+// TopValue pairs a value with how many times it appears in the data.
+type TopValue struct {
 	Value string `json:"value"`
 	Count int    `json:"count"`
 }
@@ -51,7 +51,7 @@ const (
 // Options controls the analysis behavior. A nil Options uses defaults.
 type Options struct {
 	// TopN is the number of most frequent values to include per field.
-	// Zero means use the default (10).
+	// Zero means use the default (5).
 	TopN int
 
 	// MaxTracked is the maximum number of distinct values tracked per
@@ -67,7 +67,7 @@ type Options struct {
 
 func (o *Options) topN() int {
 	if o == nil || o.TopN <= 0 {
-		return 10
+		return 5
 	}
 	return o.TopN
 }
