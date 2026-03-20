@@ -41,6 +41,7 @@ type TopValue struct {
 // DataType represents the inferred type of a CSV column.
 type DataType string
 
+// Supported data types for CSV columns.
 const (
 	TypeText    DataType = "text"
 	TypeNumeric DataType = "numeric"
