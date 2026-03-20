@@ -180,7 +180,7 @@ func getRowCount(ctx context.Context, pool *pgxpool.Pool, schema, tableName stri
 	if estimate < 10000 {
 		var exact int64
 		err := pool.QueryRow(ctx,
-			fmt.Sprintf("SELECT COUNT(*) FROM %q.%q", schema, tableName),
+			"SELECT COUNT(*) FROM "+quoteIdent(schema, tableName),
 		).Scan(&exact)
 		if err != nil {
 			return estimate, nil // fall back to estimate
@@ -205,13 +205,13 @@ func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName st
 	maxSample := opts.maxSampleRows()
 	topN := opts.topN()
 
-	// Build column list
+	// Build column list with properly quoted identifiers
 	colList := ""
 	for i, f := range fields {
 		if i > 0 {
 			colList += ", "
 		}
-		colList += fmt.Sprintf("%q", f.Name)
+		colList += quoteIdent(f.Name)
 	}
 
 	// Per-column accumulators
@@ -240,8 +240,8 @@ func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName st
 		}
 
 		query := fmt.Sprintf(
-			"SELECT %s FROM %q.%q LIMIT %d OFFSET %d",
-			colList, schema, tableName, limit, offset,
+			"SELECT %s FROM %s LIMIT %d OFFSET %d",
+			colList, quoteIdent(schema, tableName), limit, offset,
 		)
 
 		rows, err := pool.Query(ctx, query)
@@ -599,6 +599,13 @@ func normalizeDataType(pgType string) string {
 	}
 
 	return pgType
+}
+
+// quoteIdent returns a properly quoted PostgreSQL identifier.
+// Uses pgx.Identifier which doubles internal quotes per SQL standard,
+// unlike Go's %q which uses backslash escaping.
+func quoteIdent(parts ...string) string {
+	return pgx.Identifier(parts).Sanitize()
 }
 
 // sanitizeConnString strips the password from a connection string.
