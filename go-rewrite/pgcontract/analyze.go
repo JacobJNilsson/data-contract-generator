@@ -3,6 +3,8 @@ package pgcontract
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -336,33 +338,22 @@ func topNValues(freqs map[string]int, n int) []TopValue {
 		return nil
 	}
 
-	type kv struct {
-		key   string
-		count int
-	}
-	sorted := make([]kv, 0, len(freqs))
+	entries := make([]TopValue, 0, len(freqs))
 	for k, v := range freqs {
-		sorted = append(sorted, kv{k, v})
+		entries = append(entries, TopValue{Value: k, Count: v})
 	}
 
-	for i := range sorted {
-		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].count > sorted[i].count ||
-				(sorted[j].count == sorted[i].count && sorted[j].key < sorted[i].key) {
-				sorted[i], sorted[j] = sorted[j], sorted[i]
-			}
+	slices.SortFunc(entries, func(a, b TopValue) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count // descending
 		}
-	}
+		return strings.Compare(a.Value, b.Value) // ascending
+	})
 
-	if n > len(sorted) {
-		n = len(sorted)
+	if n > len(entries) {
+		n = len(entries)
 	}
-
-	result := make([]TopValue, n)
-	for i := 0; i < n; i++ {
-		result[i] = TopValue{Value: sorted[i].key, Count: sorted[i].count}
-	}
-	return result
+	return entries[:n]
 }
 
 // getColumns retrieves column information from information_schema.
