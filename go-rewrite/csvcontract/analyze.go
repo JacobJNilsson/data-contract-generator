@@ -175,8 +175,11 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		}
 
 		record, readErr := reader.Read()
-		if readErr != nil {
+		if readErr == io.EOF {
 			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("parse error at row %d: %w", totalRows+2, readErr)
 		}
 		totalRows++
 		observeRow(record, profilers, colTypes, numFields)

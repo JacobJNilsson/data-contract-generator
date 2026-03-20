@@ -694,6 +694,48 @@ func TestAnalyzeAllRowsProfiled(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReaderStreamParseError(t *testing.T) {
+	// Verify that a non-EOF error during CSV streaming is returned,
+	// not silently swallowed.
+	r := &failDuringStreamReader{
+		data: []byte("name,age\nAlice,30\nBob,25\n"),
+	}
+	_, err := AnalyzeReader(ctx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for mid-stream read failure")
+	}
+	if !strings.Contains(err.Error(), "injected stream error") {
+		t.Errorf("error = %q, want to contain 'injected stream error'", err)
+	}
+}
+
+// failDuringStreamReader succeeds for the sniffing and first-row reads
+// but fails partway through streaming.
+type failDuringStreamReader struct {
+	data   []byte
+	offset int
+	reads  int
+}
+
+func (r *failDuringStreamReader) Read(p []byte) (int, error) {
+	r.reads++
+	// Fail on the 4th read (after sniff buffer, seek, and first row).
+	if r.reads >= 4 {
+		return 0, fmt.Errorf("injected stream error")
+	}
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *failDuringStreamReader) Seek(offset int64, _ int) (int64, error) {
+	r.offset = int(offset)
+	return offset, nil
+}
+
 // assertContract compares the actual contract against the expected one,
 // ignoring the SourcePath field (which depends on the caller).
 func assertContract(t *testing.T, got *SourceContract, want SourceContract) {
