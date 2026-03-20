@@ -66,7 +66,6 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 		delimBuf = bytes.TrimPrefix(delimBuf, utf8BOM)
 	}
 	if encoding == "latin-1" {
-		hasBOM = false
 		delimBuf = decodeLatin1(delimBuf)
 	}
 	delimiter := detectDelimiterFromBytes(delimBuf)
