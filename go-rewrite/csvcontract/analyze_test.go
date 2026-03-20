@@ -737,6 +737,53 @@ func (r *failDuringStreamReader) Seek(offset int64, _ int) (int64, error) {
 	return offset, nil
 }
 
+func TestAnalyzeRowShorterThanHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "short.csv")
+	// Row 2 has only 1 field, header has 3.
+	content := "name,age,city\nAlice,30,NYC\nBob\nCarol,25,LA\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contract, err := AnalyzeFile(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	// All 3 rows should be counted (short rows are still valid rows).
+	if contract.TotalRows != 3 {
+		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
+	}
+	// Should still have 3 fields.
+	if len(contract.Fields) != 3 {
+		t.Errorf("fields = %d, want 3", len(contract.Fields))
+	}
+}
+
+func TestAnalyzeRowLongerThanHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.csv")
+	// Row 2 has 4 fields, header has 2. Extra fields are dropped.
+	content := "name,age\nAlice,30\nBob,25,NYC,extra\nCarol,35\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contract, err := AnalyzeFile(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	if contract.TotalRows != 3 {
+		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
+	}
+	// Should still have 2 fields (header determines field count).
+	if len(contract.Fields) != 2 {
+		t.Errorf("fields = %d, want 2", len(contract.Fields))
+	}
+}
+
 // assertContract compares the actual contract against the expected one,
 // ignoring the SourcePath field (which depends on the caller).
 func assertContract(t *testing.T, got *SourceContract, want SourceContract) {
