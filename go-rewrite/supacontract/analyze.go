@@ -12,7 +12,7 @@ import (
 
 // AnalyzeDatabase fetches the PostgREST OpenAPI spec from a Supabase project
 // and returns a DatabaseContract describing every exposed table.
-func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string, _ *Options) (*DatabaseContract, error) {
+func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DatabaseContract, error) {
 	if err := validateProjectURL(projectURL); err != nil {
 		return nil, err
 	}

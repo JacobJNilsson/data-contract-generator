@@ -29,11 +29,3 @@ const (
 	ConstraintPrimaryKey = pgcontract.ConstraintPrimaryKey
 	ConstraintForeignKey = pgcontract.ConstraintForeignKey
 )
-
-// Options controls the analysis behaviour.
-type Options struct {
-	// SampleSize is not used for OpenAPI-based introspection but kept
-	// for API compatibility. The OpenAPI endpoint returns full schema
-	// without needing to sample data.
-	SampleSize int
-}

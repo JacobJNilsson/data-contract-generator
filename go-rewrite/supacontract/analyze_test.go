@@ -392,14 +392,14 @@ func TestAnalyzeFromURL_ConnectionRefused(t *testing.T) {
 }
 
 func TestAnalyzeDatabase_EmptyAPIKey(t *testing.T) {
-	_, err := AnalyzeDatabase(context.Background(), "https://test.supabase.co", "", nil)
+	_, err := AnalyzeDatabase(context.Background(), "https://test.supabase.co", "")
 	if err == nil {
 		t.Error("expected error for empty API key")
 	}
 }
 
 func TestAnalyzeDatabase_InvalidURL(t *testing.T) {
-	_, err := AnalyzeDatabase(context.Background(), "http://not-supabase.com", "key", nil)
+	_, err := AnalyzeDatabase(context.Background(), "http://not-supabase.com", "key")
 	if err == nil {
 		t.Error("expected error for invalid URL")
 	}
