@@ -22,6 +22,7 @@ type TableContract struct {
 	Fields          []FieldDefinition `json:"fields"`
 	SampleData      [][]string        `json:"sample_data,omitempty"`
 	ValidationRules ValidationRules   `json:"validation_rules"`
+	Issues          []string          `json:"issues,omitempty"`
 }
 
 // FieldDefinition describes a single column in a table.
