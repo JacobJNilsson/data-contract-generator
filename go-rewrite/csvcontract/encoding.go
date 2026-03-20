@@ -29,7 +29,9 @@ func detectEncodingFromBytes(data []byte) (encoding string, hasBOM bool) {
 	if utf8.Valid(content) {
 		return "utf-8", hasBOM
 	}
-	return "latin-1", hasBOM
+	// The bytes 0xEF 0xBB 0xBF are valid Latin-1 characters (ï»¿),
+	// not a BOM. Only UTF-8 files have BOMs.
+	return "latin-1", false
 }
 
 // newLatin1Reader wraps r so that Latin-1 bytes are decoded to UTF-8
