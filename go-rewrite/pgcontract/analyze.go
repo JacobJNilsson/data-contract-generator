@@ -147,10 +147,13 @@ func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName str
 		return nil, fmt.Errorf("failed to get row count: %w", err)
 	}
 
-	// Profile data from a bounded sample
+	// Profile data from a bounded sample. Profiling failure is non-fatal
+	// since we still have useful schema info, but we surface the error
+	// in Issues so callers know what happened.
+	var issues []string
 	sampleData, err := profileFields(ctx, pool, schema, tableName, fields, opts)
 	if err != nil {
-		// Profiling failure is non-fatal — we still have schema info
+		issues = append(issues, "profiling failed: "+err.Error())
 		sampleData = nil
 	}
 
@@ -161,6 +164,7 @@ func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName str
 		Fields:          fields,
 		SampleData:      sampleData,
 		ValidationRules: buildValidationRules(fields, constraints),
+		Issues:          issues,
 	}, nil
 }
 
