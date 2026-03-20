@@ -20,23 +20,26 @@ func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string, _ *Options)
 		return nil, fmt.Errorf("api_key is required")
 	}
 
-	spec, err := fetchOpenAPISpec(ctx, projectURL, apiKey)
+	return analyzeFromURL(ctx, projectURL, apiKey, extractProjectRef(projectURL))
+}
+
+// analyzeFromURL does the actual work. Separated from AnalyzeDatabase so
+// tests can bypass URL validation and point at httptest servers.
+func analyzeFromURL(ctx context.Context, baseURL, apiKey, databaseID string) (*DatabaseContract, error) {
+	spec, err := fetchOpenAPISpec(ctx, baseURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
 
-	tables, err := parseTables(spec)
-	if err != nil {
-		return nil, err
-	}
+	tables := parseTables(spec)
 
 	return &DatabaseContract{
 		ContractType: "destination",
-		DatabaseID:   extractProjectRef(projectURL),
+		DatabaseID:   databaseID,
 		Tables:       tables,
 		Metadata: map[string]any{
 			"source":      "supabase",
-			"project_url": projectURL,
+			"project_url": baseURL,
 			"table_count": len(tables),
 		},
 	}, nil
@@ -130,23 +133,19 @@ func fetchOpenAPISpec(ctx context.Context, projectURL, apiKey string) (*openAPIS
 }
 
 // parseTables extracts TableContracts from the OpenAPI spec.
-func parseTables(spec *openAPISpec) ([]TableContract, error) {
-	// Discover table names from paths (skip /rpc/ endpoints)
+func parseTables(spec *openAPISpec) []TableContract {
 	tableNames := extractTableNames(spec.Paths)
 
 	tables := make([]TableContract, 0, len(tableNames))
 	for _, name := range tableNames {
 		def, ok := spec.Definitions[name]
 		if !ok {
-			// Table in paths but not in definitions — skip
 			continue
 		}
-
-		table := buildTable(name, def)
-		tables = append(tables, table)
+		tables = append(tables, buildTable(name, def))
 	}
 
-	return tables, nil
+	return tables
 }
 
 // extractTableNames returns sorted table names from OpenAPI paths.

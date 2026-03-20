@@ -1,0 +1,870 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>pgcontract: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/jacobjnilsson/contract-gen/pgcontract/analyze.go (86.7%)</option>
+				
+				<option value="file1">github.com/jacobjnilsson/contract-gen/pgcontract/contract.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package pgcontract
+
+import (
+        "context"
+        "fmt"
+
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
+)
+
+// AnalyzeDatabase connects to a PostgreSQL database and generates a contract
+// describing every table in the specified schema. The AI agent uses this to
+// decide which table to ingest data into or extract data from.
+func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*DatabaseContract, error) <span class="cov2" title="2">{
+        pool, err := pgxpool.New(ctx, connString)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to connect to database: %w", err)
+        }</span>
+        <span class="cov2" title="2">defer pool.Close()
+
+        if err := pool.Ping(ctx); err != nil </span><span class="cov1" title="1">{
+                return nil, fmt.Errorf("failed to ping database: %w", err)
+        }</span>
+
+        <span class="cov1" title="1">schema := opts.schema()
+
+        tableNames, err := listTables(ctx, pool, schema)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to list tables: %w", err)
+        }</span>
+
+        <span class="cov1" title="1">tables := make([]TableContract, 0, len(tableNames))
+        for _, name := range tableNames </span><span class="cov2" title="2">{
+                table, err := analyzeTable(ctx, pool, schema, name, opts)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("failed to analyze table %s: %w", name, err)
+                }</span>
+                <span class="cov2" title="2">tables = append(tables, *table)</span>
+        }
+
+        <span class="cov1" title="1">var dbName string
+        if err := pool.QueryRow(ctx, "SELECT current_database()").Scan(&amp;dbName); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to get database name: %w", err)
+        }</span>
+
+        <span class="cov1" title="1">return &amp;DatabaseContract{
+                ContractType: "destination",
+                DatabaseID:   dbName,
+                Tables:       tables,
+                Metadata: map[string]any{
+                        "source":      "postgresql",
+                        "schema":      schema,
+                        "table_count": len(tables),
+                        "connection":  sanitizeConnString(connString),
+                },
+        }, nil</span>
+}
+
+// AnalyzeTable connects to a PostgreSQL database and generates a contract
+// for a single table.
+func AnalyzeTable(ctx context.Context, connString, tableName string, opts *Options) (*TableContract, error) <span class="cov2" title="2">{
+        pool, err := pgxpool.New(ctx, connString)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to connect to database: %w", err)
+        }</span>
+        <span class="cov2" title="2">defer pool.Close()
+
+        if err := pool.Ping(ctx); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to ping database: %w", err)
+        }</span>
+
+        <span class="cov2" title="2">schema := opts.schema()
+
+        exists, err := tableExists(ctx, pool, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov2" title="2">if !exists </span><span class="cov1" title="1">{
+                return nil, fmt.Errorf("table %s.%s does not exist", schema, tableName)
+        }</span>
+
+        <span class="cov1" title="1">return analyzeTable(ctx, pool, schema, tableName, opts)</span>
+}
+
+// --- internal helpers -------------------------------------------------------
+
+// listTables returns all user table names in the specified schema.
+func listTables(ctx context.Context, pool *pgxpool.Pool, schema string) ([]string, error) <span class="cov1" title="1">{
+        query := `
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = $1 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+        `
+
+        rows, err := pool.Query(ctx, query, schema)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov1" title="1">defer rows.Close()
+
+        var tables []string
+        for rows.Next() </span><span class="cov2" title="2">{
+                var name string
+                if err := rows.Scan(&amp;name); err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov2" title="2">tables = append(tables, name)</span>
+        }
+        <span class="cov1" title="1">return tables, rows.Err()</span>
+}
+
+// tableExists checks if a table exists in the specified schema.
+func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) (bool, error) <span class="cov2" title="2">{
+        query := `
+                SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = $1 AND table_name = $2
+                )
+        `
+        var exists bool
+        err := pool.QueryRow(ctx, query, schema, tableName).Scan(&amp;exists)
+        return exists, err
+}</span>
+
+// analyzeTable introspects a single table and returns its contract,
+// including data profiling from a bounded sample.
+func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, opts *Options) (*TableContract, error) <span class="cov3" title="3">{
+        fields, err := getColumns(ctx, pool, schema, tableName, opts.includeComments())
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to get columns: %w", err)
+        }</span>
+
+        <span class="cov3" title="3">constraints, err := getConstraints(ctx, pool, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to get constraints: %w", err)
+        }</span>
+
+        <span class="cov3" title="3">applyConstraints(fields, constraints)
+
+        // Get row count
+        rowCount, err := getRowCount(ctx, pool, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to get row count: %w", err)
+        }</span>
+
+        // Profile data from a bounded sample
+        <span class="cov3" title="3">sampleData, err := profileFields(ctx, pool, schema, tableName, fields, opts)
+        if err != nil </span><span class="cov0" title="0">{
+                // Profiling failure is non-fatal — we still have schema info
+                sampleData = nil
+        }</span>
+
+        <span class="cov3" title="3">return &amp;TableContract{
+                TableName:       tableName,
+                Schema:          schema,
+                RowCount:        &amp;rowCount,
+                Fields:          fields,
+                SampleData:      sampleData,
+                ValidationRules: buildValidationRules(fields, constraints),
+        }, nil</span>
+}
+
+// getRowCount returns the approximate row count for a table using pg_stat.
+// Falls back to COUNT(*) with a limit for accuracy on small tables.
+func getRowCount(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) (int64, error) <span class="cov3" title="3">{
+        // Use pg_stat for large tables (fast estimate)
+        var estimate int64
+        err := pool.QueryRow(ctx, `
+                SELECT COALESCE(n_live_tup, 0)
+                FROM pg_stat_user_tables
+                WHERE schemaname = $1 AND relname = $2
+        `, schema, tableName).Scan(&amp;estimate)
+        if err != nil </span><span class="cov0" title="0">{
+                return 0, err
+        }</span>
+
+        // If the estimate is low, get an exact count (cheap for small tables)
+        <span class="cov3" title="3">if estimate &lt; 10000 </span><span class="cov3" title="3">{
+                var exact int64
+                err := pool.QueryRow(ctx,
+                        fmt.Sprintf("SELECT COUNT(*) FROM %q.%q", schema, tableName),
+                ).Scan(&amp;exact)
+                if err != nil </span><span class="cov0" title="0">{
+                        return estimate, nil // fall back to estimate
+                }</span>
+                <span class="cov3" title="3">return exact, nil</span>
+        }
+
+        <span class="cov0" title="0">return estimate, nil</span>
+}
+
+// profileFields samples rows from the table in batches and computes
+// per-column statistics. The total number of rows read is bounded by
+// opts.sampleSize (default 10 000) and each batch fetches opts.batchSize
+// rows (default 1000) to keep memory usage predictable.
+func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition, opts *Options) ([][]string, error) <span class="cov3" title="3">{
+        if len(fields) == 0 </span><span class="cov0" title="0">{
+                return nil, nil
+        }</span>
+
+        <span class="cov3" title="3">sampleLimit := opts.sampleSize()
+        batchSize := opts.batchSize()
+        maxSample := opts.maxSampleRows()
+        topN := opts.topN()
+
+        // Build column list
+        colList := ""
+        for i, f := range fields </span><span class="cov7" title="12">{
+                if i &gt; 0 </span><span class="cov6" title="9">{
+                        colList += ", "
+                }</span>
+                <span class="cov7" title="12">colList += fmt.Sprintf("%q", f.Name)</span>
+        }
+
+        // Per-column accumulators
+        <span class="cov3" title="3">type colStats struct {
+                nulls    int
+                min      *string
+                max      *string
+                freqs    map[string]int
+                distinct map[string]bool
+        }
+        stats := make([]colStats, len(fields))
+        for i := range stats </span><span class="cov7" title="12">{
+                stats[i].freqs = make(map[string]int)
+                stats[i].distinct = make(map[string]bool)
+        }</span>
+
+        <span class="cov3" title="3">var sampleData [][]string
+        totalRows := 0
+
+        // Fetch in batches using LIMIT/OFFSET
+        for offset := 0; offset &lt; sampleLimit; offset += batchSize </span><span class="cov3" title="3">{
+                remaining := sampleLimit - offset
+                limit := batchSize
+                if limit &gt; remaining </span><span class="cov0" title="0">{
+                        limit = remaining
+                }</span>
+
+                <span class="cov3" title="3">query := fmt.Sprintf(
+                        "SELECT %s FROM %q.%q LIMIT %d OFFSET %d",
+                        colList, schema, tableName, limit, offset,
+                )
+
+                rows, err := pool.Query(ctx, query)
+                if err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                <span class="cov3" title="3">batchCount := 0
+                for rows.Next() </span><span class="cov5" title="7">{
+                        vals, err := rows.Values()
+                        if err != nil </span><span class="cov0" title="0">{
+                                rows.Close()
+                                return nil, err
+                        }</span>
+                        <span class="cov5" title="7">totalRows++
+                        batchCount++
+
+                        row := make([]string, len(fields))
+                        for i, v := range vals </span><span class="cov9" title="35">{
+                                if v == nil </span><span class="cov1" title="1">{
+                                        stats[i].nulls++
+                                        row[i] = ""
+                                        continue</span>
+                                }
+
+                                <span class="cov9" title="34">s := fmt.Sprintf("%v", v)
+                                row[i] = s
+
+                                // Min/max (lexicographic; good enough for profiling)
+                                if stats[i].min == nil || s &lt; *stats[i].min </span><span class="cov7" title="16">{
+                                        cp := s
+                                        stats[i].min = &amp;cp
+                                }</span>
+                                <span class="cov9" title="34">if stats[i].max == nil || s &gt; *stats[i].max </span><span class="cov8" title="21">{
+                                        cp := s
+                                        stats[i].max = &amp;cp
+                                }</span>
+
+                                <span class="cov9" title="34">stats[i].distinct[s] = true
+
+                                // Track frequency (cap map to avoid memory blowup)
+                                if len(stats[i].freqs) &lt; 10000 </span><span class="cov9" title="34">{
+                                        stats[i].freqs[s]++
+                                }</span> else<span class="cov0" title="0"> if _, exists := stats[i].freqs[s]; exists </span><span class="cov0" title="0">{
+                                        stats[i].freqs[s]++
+                                }</span>
+                        }
+
+                        <span class="cov5" title="7">if len(sampleData) &lt; maxSample </span><span class="cov5" title="7">{
+                                sampleData = append(sampleData, row)
+                        }</span>
+                }
+                <span class="cov3" title="3">rows.Close()
+
+                if err := rows.Err(); err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+
+                // Table exhausted before reaching sampleLimit
+                <span class="cov3" title="3">if batchCount &lt; limit </span><span class="cov3" title="3">{
+                        break</span>
+                }
+        }
+
+        // Build profiles
+        <span class="cov3" title="3">for i := range fields </span><span class="cov7" title="12">{
+                if totalRows == 0 </span><span class="cov2" title="2">{
+                        continue</span>
+                }
+
+                <span class="cov6" title="10">s := stats[i]
+                profile := &amp;FieldProfile{
+                        NullCount:      s.nulls,
+                        NullPercentage: float64(s.nulls) / float64(totalRows) * 100,
+                        DistinctCount:  len(s.distinct),
+                        MinValue:       s.min,
+                        MaxValue:       s.max,
+                        SampleSize:     totalRows,
+                        TopValues:      topNValues(s.freqs, topN),
+                }
+
+                fields[i].Profile = profile</span>
+        }
+
+        <span class="cov3" title="3">return sampleData, nil</span>
+}
+
+// topNValues returns the N most frequent values from a frequency map,
+// sorted by count descending then key ascending for deterministic output.
+func topNValues(freqs map[string]int, n int) []TopValue <span class="cov7" title="15">{
+        if len(freqs) == 0 </span><span class="cov2" title="2">{
+                return nil
+        }</span>
+
+        <span class="cov7" title="13">type kv struct {
+                key   string
+                count int
+        }
+        sorted := make([]kv, 0, len(freqs))
+        for k, v := range freqs </span><span class="cov9" title="33">{
+                sorted = append(sorted, kv{k, v})
+        }</span>
+
+        <span class="cov7" title="13">for i := range sorted </span><span class="cov9" title="33">{
+                for j := i + 1; j &lt; len(sorted); j++ </span><span class="cov9" title="32">{
+                        if sorted[j].count &gt; sorted[i].count ||
+                                (sorted[j].count == sorted[i].count &amp;&amp; sorted[j].key &lt; sorted[i].key) </span><span class="cov6" title="9">{
+                                sorted[i], sorted[j] = sorted[j], sorted[i]
+                        }</span>
+                }
+        }
+
+        <span class="cov7" title="13">if n &gt; len(sorted) </span><span class="cov6" title="11">{
+                n = len(sorted)
+        }</span>
+
+        <span class="cov7" title="13">result := make([]TopValue, n)
+        for i := 0; i &lt; n; i++ </span><span class="cov9" title="32">{
+                result[i] = TopValue{Value: sorted[i].key, Count: sorted[i].count}
+        }</span>
+        <span class="cov7" title="13">return result</span>
+}
+
+// getColumns retrieves column information from information_schema.
+func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, includeComments bool) ([]FieldDefinition, error) <span class="cov3" title="3">{
+        query := `
+                SELECT 
+                        c.column_name,
+                        c.data_type,
+                        c.is_nullable = 'YES' as is_nullable,
+                        CASE 
+                                WHEN c.data_type = 'character varying' THEN 'varchar(' || c.character_maximum_length || ')'
+                                WHEN c.data_type = 'character' THEN 'char(' || c.character_maximum_length || ')'
+                                WHEN c.data_type = 'numeric' AND c.numeric_precision IS NOT NULL THEN 
+                                        'numeric(' || c.numeric_precision || ',' || c.numeric_scale || ')'
+                                ELSE c.data_type
+                        END as full_type
+                FROM information_schema.columns c
+                WHERE c.table_schema = $1 AND c.table_name = $2
+                ORDER BY c.ordinal_position
+        `
+
+        rows, err := pool.Query(ctx, query, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov3" title="3">defer rows.Close()
+
+        var fields []FieldDefinition
+        for rows.Next() </span><span class="cov7" title="12">{
+                var name, dataType, fullType string
+                var isNullable bool
+                if err := rows.Scan(&amp;name, &amp;dataType, &amp;isNullable, &amp;fullType); err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov7" title="12">fields = append(fields, FieldDefinition{
+                        Name:     name,
+                        DataType: normalizeDataType(fullType),
+                        Nullable: isNullable,
+                })</span>
+        }
+        <span class="cov3" title="3">if err := rows.Err(); err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+
+        <span class="cov3" title="3">if includeComments </span><span class="cov2" title="2">{
+                if err := addColumnComments(ctx, pool, schema, tableName, fields); err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+        }
+
+        <span class="cov3" title="3">return fields, nil</span>
+}
+
+// addColumnComments reads pg_description and sets field Description pointers.
+func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition) error <span class="cov2" title="2">{
+        query := `
+                SELECT a.attname, d.description
+                FROM pg_catalog.pg_description d
+                JOIN pg_catalog.pg_class c ON d.objoid = c.oid
+                JOIN pg_catalog.pg_attribute a ON c.oid = a.attrelid AND d.objsubid = a.attnum
+                JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+                WHERE n.nspname = $1 AND c.relname = $2
+                AND d.description IS NOT NULL
+        `
+
+        rows, err := pool.Query(ctx, query, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+        <span class="cov2" title="2">defer rows.Close()
+
+        comments := make(map[string]string)
+        for rows.Next() </span><span class="cov2" title="2">{
+                var col, desc string
+                if err := rows.Scan(&amp;col, &amp;desc); err != nil </span><span class="cov0" title="0">{
+                        return err
+                }</span>
+                <span class="cov2" title="2">comments[col] = desc</span>
+        }
+
+        <span class="cov2" title="2">for i := range fields </span><span class="cov6" title="10">{
+                if desc, ok := comments[fields[i].Name]; ok </span><span class="cov2" title="2">{
+                        fields[i].Description = &amp;desc
+                }</span>
+        }
+
+        <span class="cov2" title="2">return rows.Err()</span>
+}
+
+// constraintInfo represents a raw constraint row from the database.
+type constraintInfo struct {
+        ColumnName     string
+        ConstraintType string
+        ConstraintName string
+        RefTable       *string
+        RefColumn      *string
+}
+
+// getConstraints retrieves constraint information for a table.
+func getConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) ([]constraintInfo, error) <span class="cov3" title="3">{
+        query := `
+                SELECT 
+                        kcu.column_name,
+                        tc.constraint_type,
+                        tc.constraint_name,
+                        ccu.table_name as ref_table,
+                        ccu.column_name as ref_column
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu 
+                        ON tc.constraint_name = kcu.constraint_name 
+                        AND tc.table_schema = kcu.table_schema
+                LEFT JOIN information_schema.constraint_column_usage ccu
+                        ON tc.constraint_name = ccu.constraint_name
+                        AND tc.table_schema = ccu.table_schema
+                WHERE tc.table_schema = $1 AND tc.table_name = $2
+                AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE')
+                ORDER BY kcu.ordinal_position
+        `
+
+        rows, err := pool.Query(ctx, query, schema, tableName)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, err
+        }</span>
+        <span class="cov3" title="3">defer rows.Close()
+
+        var constraints []constraintInfo
+        for rows.Next() </span><span class="cov4" title="5">{
+                var c constraintInfo
+                if err := rows.Scan(&amp;c.ColumnName, &amp;c.ConstraintType, &amp;c.ConstraintName, &amp;c.RefTable, &amp;c.RefColumn); err != nil </span><span class="cov0" title="0">{
+                        return nil, err
+                }</span>
+                <span class="cov4" title="5">constraints = append(constraints, c)</span>
+        }
+        <span class="cov3" title="3">return constraints, rows.Err()</span>
+}
+
+// applyConstraints annotates field definitions with their constraints.
+func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) <span class="cov6" title="8">{
+        byColumn := make(map[string][]constraintInfo)
+        for _, c := range constraints </span><span class="cov6" title="8">{
+                byColumn[c.ColumnName] = append(byColumn[c.ColumnName], c)
+        }</span>
+
+        <span class="cov6" title="8">for i := range fields </span><span class="cov7" title="17">{
+                for _, c := range byColumn[fields[i].Name] </span><span class="cov6" title="8">{
+                        fc := FieldConstraint{}
+                        switch c.ConstraintType </span>{
+                        case "PRIMARY KEY":<span class="cov4" title="4">
+                                fc.Type = ConstraintPrimaryKey</span>
+                        case "FOREIGN KEY":<span class="cov2" title="2">
+                                fc.Type = ConstraintForeignKey
+                                fc.ReferredTable = c.RefTable
+                                fc.ReferredColumn = c.RefColumn</span>
+                        case "UNIQUE":<span class="cov2" title="2">
+                                fc.Type = ConstraintUnique</span>
+                        }
+                        <span class="cov6" title="8">fields[i].Constraints = append(fields[i].Constraints, fc)</span>
+                }
+
+                <span class="cov7" title="17">if !fields[i].Nullable </span><span class="cov6" title="11">{
+                        fields[i].Constraints = append(fields[i].Constraints, FieldConstraint{
+                                Type: ConstraintNotNull,
+                        })
+                }</span>
+        }
+}
+
+// buildValidationRules derives validation rules from fields and constraints.
+func buildValidationRules(fields []FieldDefinition, constraints []constraintInfo) ValidationRules <span class="cov5" title="6">{
+        var rules ValidationRules
+
+        for _, f := range fields </span><span class="cov7" title="17">{
+                if !f.Nullable </span><span class="cov6" title="10">{
+                        rules.RequiredFields = append(rules.RequiredFields, f.Name)
+                }</span>
+        }
+
+        <span class="cov5" title="6">uniqueCols := make(map[string]bool)
+        for _, c := range constraints </span><span class="cov6" title="8">{
+                if c.ConstraintType == "UNIQUE" || c.ConstraintType == "PRIMARY KEY" </span><span class="cov5" title="7">{
+                        uniqueCols[c.ColumnName] = true
+                }</span>
+        }
+        <span class="cov5" title="6">for col := range uniqueCols </span><span class="cov5" title="7">{
+                rules.UniqueConstraints = append(rules.UniqueConstraints, col)
+        }</span>
+
+        <span class="cov5" title="6">return rules</span>
+}
+
+// normalizeDataType maps PostgreSQL types to standard contract type names.
+func normalizeDataType(pgType string) string <span class="cov9" title="40">{
+        typeMap := map[string]string{
+                "integer":                     "integer",
+                "int":                         "integer",
+                "int4":                        "integer",
+                "bigint":                      "bigint",
+                "int8":                        "bigint",
+                "smallint":                    "smallint",
+                "int2":                        "smallint",
+                "text":                        "text",
+                "character varying":           "varchar",
+                "varchar":                     "varchar",
+                "character":                   "char",
+                "char":                        "char",
+                "boolean":                     "boolean",
+                "bool":                        "boolean",
+                "date":                        "date",
+                "timestamp":                   "timestamp",
+                "timestamp without time zone": "timestamp",
+                "timestamp with time zone":    "timestamptz",
+                "timestamptz":                 "timestamptz",
+                "numeric":                     "numeric",
+                "decimal":                     "numeric",
+                "real":                        "real",
+                "double precision":            "double",
+                "json":                        "json",
+                "jsonb":                       "jsonb",
+                "uuid":                        "uuid",
+                "bytea":                       "bytea",
+        }
+
+        if normalized, ok := typeMap[pgType]; ok </span><span class="cov9" title="33">{
+                return normalized
+        }</span>
+
+        // Handle types with parameters (e.g. varchar(255), numeric(10,2))
+        <span class="cov5" title="7">for i := len(pgType); i &gt; 0; i-- </span><span class="cov10" title="41">{
+                if pgType[i-1] == '(' </span><span class="cov5" title="6">{
+                        if normalized, ok := typeMap[pgType[:i-1]]; ok </span><span class="cov5" title="6">{
+                                return normalized
+                        }</span>
+                }
+        }
+
+        <span class="cov1" title="1">return pgType</span>
+}
+
+// sanitizeConnString strips the password from a connection string.
+func sanitizeConnString(connString string) string <span class="cov4" title="4">{
+        cfg, err := pgx.ParseConfig(connString)
+        if err != nil </span><span class="cov1" title="1">{
+                return "[connection string]"
+        }</span>
+        <span class="cov3" title="3">return fmt.Sprintf("%s@%s:%d/%s", cfg.User, cfg.Host, cfg.Port, cfg.Database)</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">// Package pgcontract analyzes PostgreSQL database schemas and produces
+// contracts describing table structures, types, and constraints. The AI
+// agent uses these contracts to decide which table to ingest data into
+// or extract data from.
+package pgcontract
+
+// DatabaseContract is the complete analysis of a PostgreSQL database,
+// containing every table in the target schema.
+type DatabaseContract struct {
+        ContractType string          `json:"contract_type"`
+        DatabaseID   string          `json:"database_id"`
+        Tables       []TableContract `json:"tables"`
+        Metadata     map[string]any  `json:"metadata,omitempty"`
+}
+
+// TableContract describes a single table: its columns, types, constraints,
+// and a sample of the data it contains.
+type TableContract struct {
+        TableName       string            `json:"table_name"`
+        Schema          string            `json:"schema"`
+        RowCount        *int64            `json:"row_count,omitempty"`
+        Fields          []FieldDefinition `json:"fields"`
+        SampleData      [][]string        `json:"sample_data,omitempty"`
+        ValidationRules ValidationRules   `json:"validation_rules"`
+}
+
+// FieldDefinition describes a single column in a table.
+type FieldDefinition struct {
+        Name        string            `json:"name"`
+        DataType    string            `json:"data_type"`
+        Nullable    bool              `json:"nullable"`
+        Description *string           `json:"description,omitempty"`
+        Constraints []FieldConstraint `json:"constraints,omitempty"`
+        Profile     *FieldProfile     `json:"profile,omitempty"`
+}
+
+// FieldProfile contains statistical observations about a column's values,
+// computed from a bounded sample (default 1000 rows).
+type FieldProfile struct {
+        NullCount      int        `json:"null_count"`
+        NullPercentage float64    `json:"null_percentage"`
+        DistinctCount  int        `json:"distinct_count"`
+        MinValue       *string    `json:"min_value"`
+        MaxValue       *string    `json:"max_value"`
+        TopValues      []TopValue `json:"top_values,omitempty"`
+        SampleSize     int        `json:"sample_size"`
+}
+
+// TopValue pairs a value with how many times it appears in the sample.
+type TopValue struct {
+        Value string `json:"value"`
+        Count int    `json:"count"`
+}
+
+// FieldConstraint represents a constraint on a column.
+type FieldConstraint struct {
+        Type           ConstraintType `json:"type"`
+        Value          any            `json:"value,omitempty"`
+        ReferredTable  *string        `json:"referred_table,omitempty"`
+        ReferredColumn *string        `json:"referred_column,omitempty"`
+}
+
+// ConstraintType enumerates the supported constraint types.
+type ConstraintType string
+
+const (
+        ConstraintNotNull    ConstraintType = "not_null"
+        ConstraintUnique     ConstraintType = "unique"
+        ConstraintPrimaryKey ConstraintType = "primary_key"
+        ConstraintForeignKey ConstraintType = "foreign_key"
+        ConstraintCheck      ConstraintType = "check"
+)
+
+// ValidationRules summarises the table-level validation requirements.
+type ValidationRules struct {
+        RequiredFields    []string `json:"required_fields,omitempty"`
+        UniqueConstraints []string `json:"unique_constraints,omitempty"`
+}
+
+// Options controls the analysis behaviour.
+type Options struct {
+        // Schema is the PostgreSQL schema to analyze (default: "public").
+        Schema string
+
+        // IncludeComments includes PostgreSQL column comments as field descriptions.
+        IncludeComments bool
+
+        // SampleSize is the maximum number of rows to sample per table for
+        // profiling. Zero means use the default (10000). Rows are fetched
+        // in batches of BatchSize to bound memory.
+        SampleSize int
+
+        // BatchSize is the number of rows fetched per batch during profiling.
+        // Zero means use the default (1000).
+        BatchSize int
+
+        // MaxSampleRows is the maximum number of rows to include in
+        // SampleData. Zero means use the default (5).
+        MaxSampleRows int
+
+        // TopN is the number of most frequent values to report per column.
+        // Zero means use the default (5).
+        TopN int
+}
+
+func (o *Options) schema() string <span class="cov10" title="6">{
+        if o == nil || o.Schema == "" </span><span class="cov7" title="4">{
+                return "public"
+        }</span>
+        <span class="cov4" title="2">return o.Schema</span>
+}
+
+func (o *Options) includeComments() bool <span class="cov10" title="6">{
+        return o != nil &amp;&amp; o.IncludeComments
+}</span>
+
+func (o *Options) sampleSize() int <span class="cov10" title="6">{
+        if o == nil || o.SampleSize &lt;= 0 </span><span class="cov9" title="5">{
+                return 10000
+        }</span>
+        <span class="cov1" title="1">return o.SampleSize</span>
+}
+
+func (o *Options) batchSize() int <span class="cov10" title="6">{
+        if o == nil || o.BatchSize &lt;= 0 </span><span class="cov9" title="5">{
+                return 1000
+        }</span>
+        <span class="cov1" title="1">return o.BatchSize</span>
+}
+
+func (o *Options) maxSampleRows() int <span class="cov10" title="6">{
+        if o == nil || o.MaxSampleRows &lt;= 0 </span><span class="cov9" title="5">{
+                return 5
+        }</span>
+        <span class="cov1" title="1">return o.MaxSampleRows</span>
+}
+
+func (o *Options) topN() int <span class="cov10" title="6">{
+        if o == nil || o.TopN &lt;= 0 </span><span class="cov9" title="5">{
+                return 5
+        }</span>
+        <span class="cov1" title="1">return o.TopN</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

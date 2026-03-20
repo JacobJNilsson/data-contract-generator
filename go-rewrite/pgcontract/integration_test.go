@@ -1,5 +1,3 @@
-//go:build integration
-
 package pgcontract
 
 import (
@@ -32,7 +30,7 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Create test tables with relationships
+	// Create test tables with relationships and seed data
 	setup := `
 		DROP TABLE IF EXISTS test_orders CASCADE;
 		DROP TABLE IF EXISTS test_users CASCADE;
@@ -47,6 +45,11 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		COMMENT ON COLUMN test_users.email IS 'User email address';
 		COMMENT ON COLUMN test_users.bio IS 'Short biography';
 
+		INSERT INTO test_users (email, name, bio) VALUES
+			('alice@example.com', 'Alice', 'Engineer'),
+			('bob@example.com', 'Bob', NULL),
+			('carol@example.com', 'Carol', 'Designer');
+
 		CREATE TABLE test_orders (
 			id SERIAL PRIMARY KEY,
 			user_id INTEGER NOT NULL REFERENCES test_users(id),
@@ -54,6 +57,12 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 			status VARCHAR(20) DEFAULT 'pending',
 			ordered_at TIMESTAMPTZ DEFAULT NOW()
 		);
+
+		INSERT INTO test_orders (user_id, total, status) VALUES
+			(1, 99.99, 'shipped'),
+			(1, 49.50, 'pending'),
+			(2, 200.00, 'shipped'),
+			(3, 15.00, 'cancelled');
 	`
 	if _, err := pool.Exec(ctx, setup); err != nil {
 		t.Fatalf("Failed to setup test tables: %v", err)
@@ -129,6 +138,64 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 	// Verify metadata
 	if contract.Metadata["table_count"] != len(contract.Tables) {
 		t.Errorf("table_count metadata = %v, want %d", contract.Metadata["table_count"], len(contract.Tables))
+	}
+
+	// Verify row counts
+	if usersTable.RowCount == nil {
+		t.Error("users row_count should not be nil")
+	} else if *usersTable.RowCount != 3 {
+		t.Errorf("users row_count = %d, want 3", *usersTable.RowCount)
+	}
+
+	if ordersTable.RowCount == nil {
+		t.Error("orders row_count should not be nil")
+	} else if *ordersTable.RowCount != 4 {
+		t.Errorf("orders row_count = %d, want 4", *ordersTable.RowCount)
+	}
+
+	// Verify sample data
+	if len(usersTable.SampleData) == 0 {
+		t.Error("users should have sample data")
+	}
+	if len(usersTable.SampleData) > 5 {
+		t.Errorf("users sample data = %d rows, want <= 5", len(usersTable.SampleData))
+	}
+
+	// Verify profiling on users.bio (has 1 null out of 3)
+	bioField := findField(usersTable.Fields, "bio")
+	if bioField == nil {
+		t.Fatal("bio field not found")
+	}
+	if bioField.Profile == nil {
+		t.Fatal("bio profile should not be nil")
+	}
+	if bioField.Profile.NullCount != 1 {
+		t.Errorf("bio null_count = %d, want 1", bioField.Profile.NullCount)
+	}
+	if bioField.Profile.SampleSize != 3 {
+		t.Errorf("bio sample_size = %d, want 3", bioField.Profile.SampleSize)
+	}
+	if bioField.Profile.DistinctCount != 2 {
+		t.Errorf("bio distinct_count = %d, want 2", bioField.Profile.DistinctCount)
+	}
+
+	// Verify profiling on orders.status (has top values)
+	statusField := findField(ordersTable.Fields, "status")
+	if statusField == nil {
+		t.Fatal("status field not found")
+	}
+	if statusField.Profile == nil {
+		t.Fatal("status profile should not be nil")
+	}
+	if len(statusField.Profile.TopValues) == 0 {
+		t.Error("status should have top values")
+	}
+	// "shipped" appears twice, should be first
+	if statusField.Profile.TopValues[0].Value != "shipped" {
+		t.Errorf("status top value = %q, want 'shipped'", statusField.Profile.TopValues[0].Value)
+	}
+	if statusField.Profile.TopValues[0].Count != 2 {
+		t.Errorf("status top count = %d, want 2", statusField.Profile.TopValues[0].Count)
 	}
 
 	// Print for manual inspection

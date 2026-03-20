@@ -124,7 +124,8 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, tableName stri
 	return exists, err
 }
 
-// analyzeTable introspects a single table and returns its contract.
+// analyzeTable introspects a single table and returns its contract,
+// including data profiling from a bounded sample.
 func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, opts *Options) (*TableContract, error) {
 	fields, err := getColumns(ctx, pool, schema, tableName, opts.includeComments())
 	if err != nil {
@@ -138,12 +139,230 @@ func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName str
 
 	applyConstraints(fields, constraints)
 
+	// Get row count
+	rowCount, err := getRowCount(ctx, pool, schema, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get row count: %w", err)
+	}
+
+	// Profile data from a bounded sample
+	sampleData, err := profileFields(ctx, pool, schema, tableName, fields, opts)
+	if err != nil {
+		// Profiling failure is non-fatal — we still have schema info
+		sampleData = nil
+	}
+
 	return &TableContract{
 		TableName:       tableName,
 		Schema:          schema,
+		RowCount:        &rowCount,
 		Fields:          fields,
+		SampleData:      sampleData,
 		ValidationRules: buildValidationRules(fields, constraints),
 	}, nil
+}
+
+// getRowCount returns the approximate row count for a table using pg_stat.
+// Falls back to COUNT(*) with a limit for accuracy on small tables.
+func getRowCount(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) (int64, error) {
+	// Use pg_stat for large tables (fast estimate)
+	var estimate int64
+	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(n_live_tup, 0)
+		FROM pg_stat_user_tables
+		WHERE schemaname = $1 AND relname = $2
+	`, schema, tableName).Scan(&estimate)
+	if err != nil {
+		return 0, err
+	}
+
+	// If the estimate is low, get an exact count (cheap for small tables)
+	if estimate < 10000 {
+		var exact int64
+		err := pool.QueryRow(ctx,
+			fmt.Sprintf("SELECT COUNT(*) FROM %q.%q", schema, tableName),
+		).Scan(&exact)
+		if err != nil {
+			return estimate, nil // fall back to estimate
+		}
+		return exact, nil
+	}
+
+	return estimate, nil
+}
+
+// profileFields samples rows from the table in batches and computes
+// per-column statistics. The total number of rows read is bounded by
+// opts.sampleSize (default 10 000) and each batch fetches opts.batchSize
+// rows (default 1000) to keep memory usage predictable.
+func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition, opts *Options) ([][]string, error) {
+	if len(fields) == 0 {
+		return nil, nil
+	}
+
+	sampleLimit := opts.sampleSize()
+	batchSize := opts.batchSize()
+	maxSample := opts.maxSampleRows()
+	topN := opts.topN()
+
+	// Build column list
+	colList := ""
+	for i, f := range fields {
+		if i > 0 {
+			colList += ", "
+		}
+		colList += fmt.Sprintf("%q", f.Name)
+	}
+
+	// Per-column accumulators
+	type colStats struct {
+		nulls    int
+		min      *string
+		max      *string
+		freqs    map[string]int
+		distinct map[string]bool
+	}
+	stats := make([]colStats, len(fields))
+	for i := range stats {
+		stats[i].freqs = make(map[string]int)
+		stats[i].distinct = make(map[string]bool)
+	}
+
+	var sampleData [][]string
+	totalRows := 0
+
+	// Fetch in batches using LIMIT/OFFSET
+	for offset := 0; offset < sampleLimit; offset += batchSize {
+		remaining := sampleLimit - offset
+		limit := batchSize
+		if limit > remaining {
+			limit = remaining
+		}
+
+		query := fmt.Sprintf(
+			"SELECT %s FROM %q.%q LIMIT %d OFFSET %d",
+			colList, schema, tableName, limit, offset,
+		)
+
+		rows, err := pool.Query(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+
+		batchCount := 0
+		for rows.Next() {
+			vals, err := rows.Values()
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			totalRows++
+			batchCount++
+
+			row := make([]string, len(fields))
+			for i, v := range vals {
+				if v == nil {
+					stats[i].nulls++
+					row[i] = ""
+					continue
+				}
+
+				s := fmt.Sprintf("%v", v)
+				row[i] = s
+
+				// Min/max (lexicographic; good enough for profiling)
+				if stats[i].min == nil || s < *stats[i].min {
+					cp := s
+					stats[i].min = &cp
+				}
+				if stats[i].max == nil || s > *stats[i].max {
+					cp := s
+					stats[i].max = &cp
+				}
+
+				stats[i].distinct[s] = true
+
+				// Track frequency (cap map to avoid memory blowup)
+				if len(stats[i].freqs) < 10000 {
+					stats[i].freqs[s]++
+				} else if _, exists := stats[i].freqs[s]; exists {
+					stats[i].freqs[s]++
+				}
+			}
+
+			if len(sampleData) < maxSample {
+				sampleData = append(sampleData, row)
+			}
+		}
+		rows.Close()
+
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+
+		// Table exhausted before reaching sampleLimit
+		if batchCount < limit {
+			break
+		}
+	}
+
+	// Build profiles
+	for i := range fields {
+		if totalRows == 0 {
+			continue
+		}
+
+		s := stats[i]
+		profile := &FieldProfile{
+			NullCount:      s.nulls,
+			NullPercentage: float64(s.nulls) / float64(totalRows) * 100,
+			DistinctCount:  len(s.distinct),
+			MinValue:       s.min,
+			MaxValue:       s.max,
+			SampleSize:     totalRows,
+			TopValues:      topNValues(s.freqs, topN),
+		}
+
+		fields[i].Profile = profile
+	}
+
+	return sampleData, nil
+}
+
+// topNValues returns the N most frequent values from a frequency map,
+// sorted by count descending then key ascending for deterministic output.
+func topNValues(freqs map[string]int, n int) []TopValue {
+	if len(freqs) == 0 {
+		return nil
+	}
+
+	type kv struct {
+		key   string
+		count int
+	}
+	sorted := make([]kv, 0, len(freqs))
+	for k, v := range freqs {
+		sorted = append(sorted, kv{k, v})
+	}
+
+	for i := range sorted {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[j].count > sorted[i].count ||
+				(sorted[j].count == sorted[i].count && sorted[j].key < sorted[i].key) {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	if n > len(sorted) {
+		n = len(sorted)
+	}
+
+	result := make([]TopValue, n)
+	for i := 0; i < n; i++ {
+		result[i] = TopValue{Value: sorted[i].key, Count: sorted[i].count}
+	}
+	return result
 }
 
 // getColumns retrieves column information from information_schema.
