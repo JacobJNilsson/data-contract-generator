@@ -52,8 +52,10 @@ func (p *columnProfiler) observe(value string) {
 func (p *columnProfiler) finish(topN int) FieldProfile {
 	var minVal, maxVal *string
 	if p.tracker.seen {
-		minVal = &p.tracker.min
-		maxVal = &p.tracker.max
+		mn := p.tracker.min()
+		mx := p.tracker.max()
+		minVal = &mn
+		maxVal = &mx
 	}
 
 	nullPct := 0.0
@@ -99,66 +101,74 @@ func (p *columnProfiler) topValues(topN int) []ValueFrequency {
 // rangeTracker tracks the minimum and maximum values seen so far,
 // using numeric-aware comparison. When all observed values are parseable
 // as numbers, it compares numerically (so "9" < "10"). When any non-numeric
-// value is seen, it uses lexicographic comparison for all values.
+// value is seen, it falls back to lexicographic comparison.
+//
+// Both numeric and lexicographic min/max are tracked simultaneously so
+// that switching modes does not require storing all observed values.
 type rangeTracker struct {
-	min, max         string
-	minNum, maxNum   float64
+	// Numeric min/max (used when allNumeric is true).
+	minNum, maxNum float64
+	minStr, maxStr string // string representations of the numeric extremes
+	// Lexicographic min/max (always tracked).
+	lexMin, lexMax   string
 	seen, allNumeric bool
-	// values stores all observed strings so that min/max can be
-	// correctly recomputed when switching from numeric to lexicographic.
-	values []string
 }
 
 func (t *rangeTracker) observe(v string) {
 	numVal, isNum := parseNumeric(v)
 
 	if !t.seen {
-		t.min = v
-		t.max = v
 		t.minNum = numVal
 		t.maxNum = numVal
+		t.minStr = v
+		t.maxStr = v
+		t.lexMin = v
+		t.lexMax = v
 		t.allNumeric = isNum
 		t.seen = true
-		t.values = append(t.values, v)
 		return
 	}
-
-	t.values = append(t.values, v)
 
 	if t.allNumeric && !isNum {
-		// Switching from numeric to lexicographic. Recompute min/max
-		// from all previously observed values using lexicographic order.
 		t.allNumeric = false
-		t.min = t.values[0]
-		t.max = t.values[0]
-		for _, prev := range t.values[1:] {
-			if prev < t.min {
-				t.min = prev
-			}
-			if prev > t.max {
-				t.max = prev
-			}
-		}
-		return
 	}
 
-	if t.allNumeric {
+	// Always track lexicographic min/max
+	if v < t.lexMin {
+		t.lexMin = v
+	}
+	if v > t.lexMax {
+		t.lexMax = v
+	}
+
+	// Track numeric min/max when value is numeric
+	if isNum {
 		if numVal < t.minNum {
-			t.min = v
 			t.minNum = numVal
+			t.minStr = v
 		}
 		if numVal > t.maxNum {
-			t.max = v
 			t.maxNum = numVal
-		}
-	} else {
-		if v < t.min {
-			t.min = v
-		}
-		if v > t.max {
-			t.max = v
+			t.maxStr = v
 		}
 	}
+}
+
+// min returns the minimum value observed, using numeric comparison when
+// all values were numeric, otherwise lexicographic.
+func (t *rangeTracker) min() string {
+	if t.allNumeric {
+		return t.minStr
+	}
+	return t.lexMin
+}
+
+// max returns the maximum value observed.
+func (t *rangeTracker) max() string {
+	if t.allNumeric {
+		return t.maxStr
+	}
+	return t.lexMax
 }
 
 // isNull returns true if the value is empty or whitespace-only.

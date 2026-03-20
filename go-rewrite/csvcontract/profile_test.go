@@ -181,11 +181,11 @@ func TestRangeTrackerNumeric(t *testing.T) {
 	for _, v := range []string{"10", "5", "20"} {
 		tracker.observe(v)
 	}
-	if tracker.min != "5" {
-		t.Errorf("min = %q, want 5", tracker.min)
+	if tracker.min() != "5" {
+		t.Errorf("min = %q, want 5", tracker.min())
 	}
-	if tracker.max != "20" {
-		t.Errorf("max = %q, want 20", tracker.max)
+	if tracker.max() != "20" {
+		t.Errorf("max = %q, want 20", tracker.max())
 	}
 }
 
@@ -194,11 +194,11 @@ func TestRangeTrackerText(t *testing.T) {
 	for _, v := range []string{"banana", "apple", "cherry"} {
 		tracker.observe(v)
 	}
-	if tracker.min != "apple" {
-		t.Errorf("min = %q, want apple", tracker.min)
+	if tracker.min() != "apple" {
+		t.Errorf("min = %q, want apple", tracker.min())
 	}
-	if tracker.max != "cherry" {
-		t.Errorf("max = %q, want cherry", tracker.max)
+	if tracker.max() != "cherry" {
+		t.Errorf("max = %q, want cherry", tracker.max())
 	}
 }
 
@@ -210,11 +210,11 @@ func TestRangeTrackerMixed(t *testing.T) {
 	tracker.observe("abc")
 	tracker.observe("5")
 
-	if tracker.min != "10" {
-		t.Errorf("min = %q, want \"10\" (lexicographic after switch)", tracker.min)
+	if tracker.min() != "10" {
+		t.Errorf("min = %q, want \"10\" (lexicographic after switch)", tracker.min())
 	}
-	if tracker.max != "abc" {
-		t.Errorf("max = %q, want \"abc\"", tracker.max)
+	if tracker.max() != "abc" {
+		t.Errorf("max = %q, want \"abc\"", tracker.max())
 	}
 }
 
@@ -224,11 +224,11 @@ func TestRangeTrackerNumericToLexSwap(t *testing.T) {
 	tracker.observe("2")
 	tracker.observe("hello")
 
-	if tracker.min != "2" {
-		t.Errorf("min = %q, want \"2\"", tracker.min)
+	if tracker.min() != "2" {
+		t.Errorf("min = %q, want \"2\"", tracker.min())
 	}
-	if tracker.max != "hello" {
-		t.Errorf("max = %q, want \"hello\"", tracker.max)
+	if tracker.max() != "hello" {
+		t.Errorf("max = %q, want \"hello\"", tracker.max())
 	}
 }
 
