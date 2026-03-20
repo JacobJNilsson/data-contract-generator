@@ -2,6 +2,7 @@ package pgcontract
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -260,7 +261,7 @@ func TestBuildValidationRules(t *testing.T) {
 			got := buildValidationRules(tt.fields, tt.constraints)
 
 			// Compare RequiredFields (order matters)
-			if !equalStringSlices(got.RequiredFields, tt.want.RequiredFields) {
+			if !slices.Equal(got.RequiredFields, tt.want.RequiredFields) {
 				t.Errorf("buildValidationRules() RequiredFields = %v, want %v", got.RequiredFields, tt.want.RequiredFields)
 			}
 			// Compare UniqueConstraints as sets (order doesn't matter)
@@ -412,45 +413,13 @@ func strPtr(s string) *string {
 	return &s
 }
 
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func equalStringSets(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-
-	// Convert to maps for set comparison
-	aMap := make(map[string]bool)
-	for _, s := range a {
-		aMap[s] = true
-	}
-
-	for _, s := range b {
-		if !aMap[s] {
-			return false
-		}
-	}
-	return true
+	sa := slices.Clone(a)
+	sb := slices.Clone(b)
+	slices.Sort(sa)
+	slices.Sort(sb)
+	return slices.Equal(sa, sb)
 }
