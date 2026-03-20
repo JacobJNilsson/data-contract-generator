@@ -16,8 +16,8 @@ var ctx = context.Background()
 
 func ptr(s string) *string { return &s }
 
-func tv(value string, count int) ValueFrequency {
-	return ValueFrequency{Value: value, Count: count}
+func tv(value string, count int) TopValue {
+	return TopValue{Value: value, Count: count}
 }
 
 func TestAnalyzeSimpleCSV(t *testing.T) {
@@ -36,22 +36,22 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 			{Name: "Name", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Alice"), MaxValue: ptr("Eve"),
-				TopValues: []ValueFrequency{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
+				TopValues: []TopValue{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
 			}},
 			{Name: "Age", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("25"), MaxValue: ptr("35"),
-				TopValues: []ValueFrequency{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
+				TopValues: []TopValue{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
 			}},
 			{Name: "City", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Berlin"), MaxValue: ptr("Tokyo"),
-				TopValues: []ValueFrequency{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
+				TopValues: []TopValue{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
 			}},
 			{Name: "Score", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("87.3"), MaxValue: ptr("95.5"),
-				TopValues: []ValueFrequency{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
+				TopValues: []TopValue{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -81,27 +81,27 @@ func TestAnalyzeEuropeanCSV(t *testing.T) {
 			{Name: "Date", DataType: TypeDate, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("2024-01-19"),
-				TopValues: []ValueFrequency{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
+				TopValues: []TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
 			}},
 			{Name: "Account", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Depot"), MaxValue: ptr("Savings"),
-				TopValues: []ValueFrequency{tv("Depot", 3), tv("Savings", 2)},
+				TopValues: []TopValue{tv("Depot", 3), tv("Savings", 2)},
 			}},
 			{Name: "Amount", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("910,11"), MaxValue: ptr("5678,90"),
-				TopValues: []ValueFrequency{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
+				TopValues: []TopValue{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
 			}},
 			{Name: "Currency", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("SEK"), MaxValue: ptr("SEK"),
-				TopValues: []ValueFrequency{tv("SEK", 5)},
+				TopValues: []TopValue{tv("SEK", 5)},
 			}},
 			{Name: "Quantity", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("50"), MaxValue: ptr("200"),
-				TopValues: []ValueFrequency{tv("100", 1), tv("200", 1), tv("50", 1)},
+				TopValues: []TopValue{tv("100", 1), tv("200", 1), tv("50", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -131,17 +131,17 @@ func TestAnalyzeNoHeader(t *testing.T) {
 			{Name: "column_1", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("3"),
-				TopValues: []ValueFrequency{tv("1", 1), tv("2", 1), tv("3", 1)},
+				TopValues: []TopValue{tv("1", 1), tv("2", 1), tv("3", 1)},
 			}},
 			{Name: "column_2", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("100"), MaxValue: ptr("300"),
-				TopValues: []ValueFrequency{tv("100", 1), tv("200", 1), tv("300", 1)},
+				TopValues: []TopValue{tv("100", 1), tv("200", 1), tv("300", 1)},
 			}},
 			{Name: "column_3", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1.41"), MaxValue: ptr("3.14"),
-				TopValues: []ValueFrequency{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
+				TopValues: []TopValue{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -166,9 +166,9 @@ func TestAnalyzeEmptyCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    0,
 		Fields: []Field{
-			{Name: "Name", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
-			{Name: "Age", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
-			{Name: "City", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []ValueFrequency{}}},
+			{Name: "Name", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
+			{Name: "Age", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
+			{Name: "City", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
 		},
 		SampleData: nil,
 		Issues:     nil,
@@ -191,22 +191,22 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 			{Name: "ID", DataType: TypeNumeric, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("5"),
-				TopValues: []ValueFrequency{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
+				TopValues: []TopValue{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
 			}},
 			{Name: "Value", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("100"), MaxValue: ptr("hello"),
-				TopValues: []ValueFrequency{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
+				TopValues: []TopValue{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
 			}},
 			{Name: "Date", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("not-a-date"),
-				TopValues: []ValueFrequency{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
+				TopValues: []TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
 			}},
 			{Name: "Notes", DataType: TypeText, Profile: FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("fifth entry"), MaxValue: ptr("third entry"),
-				TopValues: []ValueFrequency{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
+				TopValues: []TopValue{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -796,7 +796,7 @@ func assertProfile(t *testing.T, prefix string, got, want FieldProfile) {
 	assertTopValues(t, prefix, got.TopValues, want.TopValues)
 }
 
-func assertTopValues(t *testing.T, prefix string, got, want []ValueFrequency) {
+func assertTopValues(t *testing.T, prefix string, got, want []TopValue) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Errorf("%s: top_values len = %d, want %d (got %v)", prefix, len(got), len(want), got)
