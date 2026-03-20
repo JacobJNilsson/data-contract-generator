@@ -8,24 +8,69 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Analyze connects to a PostgreSQL database and generates a destination contract
-// for the specified table.
-func Analyze(ctx context.Context, connString, tableName string, opts *Options) (*DestinationContract, error) {
+// AnalyzeDatabase connects to a PostgreSQL database and generates a contract
+// describing every table in the specified schema. The AI agent uses this to
+// decide which table to ingest data into or extract data from.
+func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*DatabaseContract, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer pool.Close()
 
-	// Verify connection
 	if err := pool.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	schema := opts.schema()
-	includeComments := opts.includeComments()
 
-	// Check if table exists
+	tableNames, err := listTables(ctx, pool, schema)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tables: %w", err)
+	}
+
+	tables := make([]TableContract, 0, len(tableNames))
+	for _, name := range tableNames {
+		table, err := analyzeTable(ctx, pool, schema, name, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to analyze table %s: %w", name, err)
+		}
+		tables = append(tables, *table)
+	}
+
+	var dbName string
+	if err := pool.QueryRow(ctx, "SELECT current_database()").Scan(&dbName); err != nil {
+		return nil, fmt.Errorf("failed to get database name: %w", err)
+	}
+
+	return &DatabaseContract{
+		ContractType: "destination",
+		DatabaseID:   dbName,
+		Tables:       tables,
+		Metadata: map[string]any{
+			"source":      "postgresql",
+			"schema":      schema,
+			"table_count": len(tables),
+			"connection":  sanitizeConnString(connString),
+		},
+	}, nil
+}
+
+// AnalyzeTable connects to a PostgreSQL database and generates a contract
+// for a single table.
+func AnalyzeTable(ctx context.Context, connString, tableName string, opts *Options) (*TableContract, error) {
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	schema := opts.schema()
+
 	exists, err := tableExists(ctx, pool, schema, tableName)
 	if err != nil {
 		return nil, err
@@ -34,50 +79,44 @@ func Analyze(ctx context.Context, connString, tableName string, opts *Options) (
 		return nil, fmt.Errorf("table %s.%s does not exist", schema, tableName)
 	}
 
-	// Get columns
-	fields, err := getColumns(ctx, pool, schema, tableName, includeComments)
+	return analyzeTable(ctx, pool, schema, tableName, opts)
+}
+
+// --- internal helpers -------------------------------------------------------
+
+// listTables returns all user table names in the specified schema.
+func listTables(ctx context.Context, pool *pgxpool.Pool, schema string) ([]string, error) {
+	query := `
+		SELECT table_name 
+		FROM information_schema.tables 
+		WHERE table_schema = $1 
+		AND table_type = 'BASE TABLE'
+		ORDER BY table_name
+	`
+
+	rows, err := pool.Query(ctx, query, schema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
+		return nil, err
 	}
+	defer rows.Close()
 
-	// Get constraints
-	constraints, err := getConstraints(ctx, pool, schema, tableName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get constraints: %w", err)
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
 	}
-
-	// Apply constraints to fields
-	applyConstraints(fields, constraints)
-
-	// Build validation rules
-	rules := buildValidationRules(fields, constraints)
-
-	contract := &DestinationContract{
-		ContractType:  "destination",
-		DestinationID: fmt.Sprintf("%s.%s", schema, tableName),
-		Schema: DestinationSchema{
-			Fields: fields,
-		},
-		ValidationRules: rules,
-		Metadata: map[string]any{
-			"source":     "postgresql",
-			"schema":     schema,
-			"table":      tableName,
-			"connection": sanitizeConnString(connString),
-		},
-	}
-
-	return contract, nil
+	return tables, rows.Err()
 }
 
 // tableExists checks if a table exists in the specified schema.
 func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) (bool, error) {
 	query := `
 		SELECT EXISTS (
-			SELECT 1 
-			FROM information_schema.tables 
-			WHERE table_schema = $1 
-			AND table_name = $2
+			SELECT 1 FROM information_schema.tables 
+			WHERE table_schema = $1 AND table_name = $2
 		)
 	`
 	var exists bool
@@ -85,15 +124,29 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, tableName stri
 	return exists, err
 }
 
-// columnInfo represents information about a single column.
-type columnInfo struct {
-	Name        string
-	DataType    string
-	IsNullable  bool
-	Description *string
+// analyzeTable introspects a single table and returns its contract.
+func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, opts *Options) (*TableContract, error) {
+	fields, err := getColumns(ctx, pool, schema, tableName, opts.includeComments())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	constraints, err := getConstraints(ctx, pool, schema, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get constraints: %w", err)
+	}
+
+	applyConstraints(fields, constraints)
+
+	return &TableContract{
+		TableName:       tableName,
+		Schema:          schema,
+		Fields:          fields,
+		ValidationRules: buildValidationRules(fields, constraints),
+	}, nil
 }
 
-// getColumns retrieves column information from the database.
+// getColumns retrieves column information from information_schema.
 func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, includeComments bool) ([]FieldDefinition, error) {
 	query := `
 		SELECT 
@@ -108,8 +161,7 @@ func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName strin
 				ELSE c.data_type
 			END as full_type
 		FROM information_schema.columns c
-		WHERE c.table_schema = $1 
-		AND c.table_name = $2
+		WHERE c.table_schema = $1 AND c.table_name = $2
 		ORDER BY c.ordinal_position
 	`
 
@@ -126,21 +178,16 @@ func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName strin
 		if err := rows.Scan(&name, &dataType, &isNullable, &fullType); err != nil {
 			return nil, err
 		}
-
-		field := FieldDefinition{
+		fields = append(fields, FieldDefinition{
 			Name:     name,
 			DataType: normalizeDataType(fullType),
 			Nullable: isNullable,
-		}
-
-		fields = append(fields, field)
+		})
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	// Get column comments if requested
 	if includeComments {
 		if err := addColumnComments(ctx, pool, schema, tableName, fields); err != nil {
 			return nil, err
@@ -150,18 +197,15 @@ func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName strin
 	return fields, nil
 }
 
-// addColumnComments adds PostgreSQL column comments as descriptions.
+// addColumnComments reads pg_description and sets field Description pointers.
 func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition) error {
 	query := `
-		SELECT 
-			a.attname as column_name,
-			d.description
+		SELECT a.attname, d.description
 		FROM pg_catalog.pg_description d
 		JOIN pg_catalog.pg_class c ON d.objoid = c.oid
 		JOIN pg_catalog.pg_attribute a ON c.oid = a.attrelid AND d.objsubid = a.attnum
 		JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
-		WHERE n.nspname = $1 
-		AND c.relname = $2
+		WHERE n.nspname = $1 AND c.relname = $2
 		AND d.description IS NOT NULL
 	`
 
@@ -173,14 +217,13 @@ func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableNam
 
 	comments := make(map[string]string)
 	for rows.Next() {
-		var columnName, description string
-		if err := rows.Scan(&columnName, &description); err != nil {
+		var col, desc string
+		if err := rows.Scan(&col, &desc); err != nil {
 			return err
 		}
-		comments[columnName] = description
+		comments[col] = desc
 	}
 
-	// Apply comments to fields
 	for i := range fields {
 		if desc, ok := comments[fields[i].Name]; ok {
 			fields[i].Description = &desc
@@ -190,7 +233,7 @@ func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableNam
 	return rows.Err()
 }
 
-// constraintInfo represents a constraint on a column.
+// constraintInfo represents a raw constraint row from the database.
 type constraintInfo struct {
 	ColumnName     string
 	ConstraintType string
@@ -199,7 +242,7 @@ type constraintInfo struct {
 	RefColumn      *string
 }
 
-// getConstraints retrieves constraint information from the database.
+// getConstraints retrieves constraint information for a table.
 func getConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tableName string) ([]constraintInfo, error) {
 	query := `
 		SELECT 
@@ -215,8 +258,7 @@ func getConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tableName s
 		LEFT JOIN information_schema.constraint_column_usage ccu
 			ON tc.constraint_name = ccu.constraint_name
 			AND tc.table_schema = ccu.table_schema
-		WHERE tc.table_schema = $1 
-		AND tc.table_name = $2
+		WHERE tc.table_schema = $1 AND tc.table_name = $2
 		AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE')
 		ORDER BY kcu.ordinal_position
 	`
@@ -235,24 +277,19 @@ func getConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tableName s
 		}
 		constraints = append(constraints, c)
 	}
-
 	return constraints, rows.Err()
 }
 
-// applyConstraints adds constraints to field definitions.
+// applyConstraints annotates field definitions with their constraints.
 func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) {
-	// Group constraints by column
 	byColumn := make(map[string][]constraintInfo)
 	for _, c := range constraints {
 		byColumn[c.ColumnName] = append(byColumn[c.ColumnName], c)
 	}
 
-	// Apply to fields
 	for i := range fields {
-		colConstraints := byColumn[fields[i].Name]
-		for _, c := range colConstraints {
+		for _, c := range byColumn[fields[i].Name] {
 			fc := FieldConstraint{}
-
 			switch c.ConstraintType {
 			case "PRIMARY KEY":
 				fc.Type = ConstraintPrimaryKey
@@ -263,11 +300,9 @@ func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) {
 			case "UNIQUE":
 				fc.Type = ConstraintUnique
 			}
-
 			fields[i].Constraints = append(fields[i].Constraints, fc)
 		}
 
-		// Add NOT NULL constraint if applicable
 		if !fields[i].Nullable {
 			fields[i].Constraints = append(fields[i].Constraints, FieldConstraint{
 				Type: ConstraintNotNull,
@@ -276,18 +311,16 @@ func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) {
 	}
 }
 
-// buildValidationRules creates validation rules from field definitions and constraints.
+// buildValidationRules derives validation rules from fields and constraints.
 func buildValidationRules(fields []FieldDefinition, constraints []constraintInfo) ValidationRules {
 	var rules ValidationRules
 
-	// Collect required fields (NOT NULL)
 	for _, f := range fields {
 		if !f.Nullable {
 			rules.RequiredFields = append(rules.RequiredFields, f.Name)
 		}
 	}
 
-	// Collect unique constraints
 	uniqueCols := make(map[string]bool)
 	for _, c := range constraints {
 		if c.ConstraintType == "UNIQUE" || c.ConstraintType == "PRIMARY KEY" {
@@ -301,9 +334,8 @@ func buildValidationRules(fields []FieldDefinition, constraints []constraintInfo
 	return rules
 }
 
-// normalizeDataType normalizes PostgreSQL data types to common names.
+// normalizeDataType maps PostgreSQL types to standard contract type names.
 func normalizeDataType(pgType string) string {
-	// Map PostgreSQL types to standard contract types
 	typeMap := map[string]string{
 		"integer":                     "integer",
 		"int":                         "integer",
@@ -334,35 +366,27 @@ func normalizeDataType(pgType string) string {
 		"bytea":                       "bytea",
 	}
 
-	// Check exact match first
 	if normalized, ok := typeMap[pgType]; ok {
 		return normalized
 	}
 
-	// Handle types with parameters (e.g., varchar(255), char(10), numeric(10,2))
-	// Check if pgType starts with any known type prefix
+	// Handle types with parameters (e.g. varchar(255), numeric(10,2))
 	for i := len(pgType); i > 0; i-- {
 		if pgType[i-1] == '(' {
-			// Found opening parenthesis, check the prefix
-			prefix := pgType[:i-1]
-			if normalized, ok := typeMap[prefix]; ok {
+			if normalized, ok := typeMap[pgType[:i-1]]; ok {
 				return normalized
 			}
 		}
 	}
 
-	// Return as-is if no mapping found
 	return pgType
 }
 
-// sanitizeConnString removes sensitive information from connection string.
+// sanitizeConnString strips the password from a connection string.
 func sanitizeConnString(connString string) string {
-	// Parse and sanitize the connection string
 	cfg, err := pgx.ParseConfig(connString)
 	if err != nil {
 		return "[connection string]"
 	}
-
-	// Return sanitized version without password
 	return fmt.Sprintf("%s@%s:%d/%s", cfg.User, cfg.Host, cfg.Port, cfg.Database)
 }

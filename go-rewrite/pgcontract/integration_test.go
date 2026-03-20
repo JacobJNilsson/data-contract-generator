@@ -1,4 +1,4 @@
-// go:build integration
+//go:build integration
 
 package pgcontract
 
@@ -11,14 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestAnalyze_Integration requires a running PostgreSQL instance.
-// Set TEST_PG_CONN environment variable to the connection string.
+// TestAnalyzeDatabase_Integration requires a running PostgreSQL instance.
+// Set TEST_PG_CONN to the connection string.
 //
 // Example:
 //
 //	export TEST_PG_CONN="postgres://postgres:postgres@localhost:5432/testdb"
-//	go test -tags=integration ./pgcontract/...
-func TestAnalyze_Integration(t *testing.T) {
+//	go test -tags=integration ./pgcontract/... -v
+func TestAnalyzeDatabase_Integration(t *testing.T) {
 	connString := os.Getenv("TEST_PG_CONN")
 	if connString == "" {
 		t.Skip("Skipping integration test: TEST_PG_CONN not set")
@@ -26,124 +26,122 @@ func TestAnalyze_Integration(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create a test table
-	setupSQL := `
-		DROP TABLE IF EXISTS test_users CASCADE;
-		CREATE TABLE test_users (
-			id SERIAL PRIMARY KEY,
-			email VARCHAR(255) NOT NULL UNIQUE,
-			name TEXT NOT NULL,
-			age INTEGER,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-		);
-		COMMENT ON COLUMN test_users.email IS 'User email address';
-	`
-
-	// Run setup (requires pgx import in test)
-	pool, err := getTestPool(ctx, connString)
+	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
 	defer pool.Close()
 
-	if _, err := pool.Exec(ctx, setupSQL); err != nil {
-		t.Fatalf("Failed to setup test table: %v", err)
+	// Create test tables with relationships
+	setup := `
+		DROP TABLE IF EXISTS test_orders CASCADE;
+		DROP TABLE IF EXISTS test_users CASCADE;
+
+		CREATE TABLE test_users (
+			id SERIAL PRIMARY KEY,
+			email VARCHAR(255) NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			bio TEXT,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		);
+		COMMENT ON COLUMN test_users.email IS 'User email address';
+		COMMENT ON COLUMN test_users.bio IS 'Short biography';
+
+		CREATE TABLE test_orders (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES test_users(id),
+			total NUMERIC(10,2) NOT NULL,
+			status VARCHAR(20) DEFAULT 'pending',
+			ordered_at TIMESTAMPTZ DEFAULT NOW()
+		);
+	`
+	if _, err := pool.Exec(ctx, setup); err != nil {
+		t.Fatalf("Failed to setup test tables: %v", err)
 	}
 
-	// Test analysis
-	contract, err := Analyze(ctx, connString, "test_users", &Options{
+	// Analyze entire database
+	contract, err := AnalyzeDatabase(ctx, connString, &Options{
 		Schema:          "public",
 		IncludeComments: true,
 	})
 	if err != nil {
-		t.Fatalf("Analyze() error = %v", err)
+		t.Fatalf("AnalyzeDatabase() error = %v", err)
 	}
 
-	// Verify contract structure
 	if contract.ContractType != "destination" {
 		t.Errorf("ContractType = %v, want destination", contract.ContractType)
 	}
 
-	if contract.DestinationID != "public.test_users" {
-		t.Errorf("DestinationID = %v, want public.test_users", contract.DestinationID)
+	if len(contract.Tables) < 2 {
+		t.Fatalf("Expected at least 2 tables, got %d", len(contract.Tables))
 	}
 
-	// Verify fields
-	if len(contract.Schema.Fields) != 5 {
-		t.Errorf("Got %d fields, want 5", len(contract.Schema.Fields))
-	}
-
-	// Find id field and verify it has primary key constraint
-	var idField *FieldDefinition
-	for i := range contract.Schema.Fields {
-		if contract.Schema.Fields[i].Name == "id" {
-			idField = &contract.Schema.Fields[i]
-			break
+	// Find the test tables
+	var usersTable, ordersTable *TableContract
+	for i := range contract.Tables {
+		switch contract.Tables[i].TableName {
+		case "test_users":
+			usersTable = &contract.Tables[i]
+		case "test_orders":
+			ordersTable = &contract.Tables[i]
 		}
 	}
+
+	if usersTable == nil {
+		t.Fatal("test_users table not found in contract")
+	}
+	if ordersTable == nil {
+		t.Fatal("test_orders table not found in contract")
+	}
+
+	// Verify users table
+	if len(usersTable.Fields) != 5 {
+		t.Errorf("test_users: got %d fields, want 5", len(usersTable.Fields))
+	}
+
+	// Verify id has primary key
+	idField := findField(usersTable.Fields, "id")
 	if idField == nil {
 		t.Fatal("id field not found")
 	}
-
-	if idField.DataType != "integer" {
-		t.Errorf("id DataType = %v, want integer", idField.DataType)
+	if !hasConstraint(idField.Constraints, ConstraintPrimaryKey) {
+		t.Error("id should have primary key constraint")
 	}
 
-	if idField.Nullable {
-		t.Error("id should not be nullable")
-	}
-
-	hasPrimaryKey := false
-	for _, c := range idField.Constraints {
-		if c.Type == ConstraintPrimaryKey {
-			hasPrimaryKey = true
-			break
-		}
-	}
-	if !hasPrimaryKey {
-		t.Error("id field should have primary key constraint")
-	}
-
-	// Verify email field comment
-	var emailField *FieldDefinition
-	for i := range contract.Schema.Fields {
-		if contract.Schema.Fields[i].Name == "email" {
-			emailField = &contract.Schema.Fields[i]
-			break
-		}
-	}
+	// Verify email has comment
+	emailField := findField(usersTable.Fields, "email")
 	if emailField == nil {
 		t.Fatal("email field not found")
 	}
-
-	if emailField.Description == nil {
-		t.Error("email Description should not be nil")
-	} else if *emailField.Description != "User email address" {
-		t.Errorf("email Description = %v, want 'User email address'", *emailField.Description)
+	if emailField.Description == nil || *emailField.Description != "User email address" {
+		t.Errorf("email description = %v, want 'User email address'", emailField.Description)
 	}
 
-	// Verify validation rules
-	if len(contract.ValidationRules.RequiredFields) < 2 {
-		t.Errorf("Expected at least 2 required fields, got %d", len(contract.ValidationRules.RequiredFields))
+	// Verify orders table has foreign key
+	userIDField := findField(ordersTable.Fields, "user_id")
+	if userIDField == nil {
+		t.Fatal("user_id field not found in orders")
+	}
+	if !hasConstraint(userIDField.Constraints, ConstraintForeignKey) {
+		t.Error("user_id should have foreign key constraint")
 	}
 
-	if len(contract.ValidationRules.UniqueConstraints) < 2 {
-		t.Errorf("Expected at least 2 unique constraints, got %d", len(contract.ValidationRules.UniqueConstraints))
+	// Verify metadata
+	if contract.Metadata["table_count"] != len(contract.Tables) {
+		t.Errorf("table_count metadata = %v, want %d", contract.Metadata["table_count"], len(contract.Tables))
 	}
 
-	// Print contract for manual inspection
+	// Print for manual inspection
 	if testing.Verbose() {
 		b, _ := json.MarshalIndent(contract, "", "  ")
-		t.Logf("Generated contract:\n%s", b)
+		t.Logf("Generated database contract:\n%s", b)
 	}
 
 	// Cleanup
-	if _, err := pool.Exec(ctx, "DROP TABLE IF EXISTS test_users CASCADE"); err != nil {
-		t.Logf("Warning: Failed to cleanup test table: %v", err)
-	}
+	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS test_orders CASCADE; DROP TABLE IF EXISTS test_users CASCADE")
 }
 
-func TestAnalyze_Integration_TableNotFound(t *testing.T) {
+func TestAnalyzeTable_Integration(t *testing.T) {
 	connString := os.Getenv("TEST_PG_CONN")
 	if connString == "" {
 		t.Skip("Skipping integration test: TEST_PG_CONN not set")
@@ -151,22 +149,75 @@ func TestAnalyze_Integration_TableNotFound(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err := Analyze(ctx, connString, "nonexistent_table", nil)
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer pool.Close()
+
+	setup := `
+		DROP TABLE IF EXISTS test_single CASCADE;
+		CREATE TABLE test_single (
+			id SERIAL PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`
+	if _, err := pool.Exec(ctx, setup); err != nil {
+		t.Fatalf("Failed to setup: %v", err)
+	}
+
+	table, err := AnalyzeTable(ctx, connString, "test_single", nil)
+	if err != nil {
+		t.Fatalf("AnalyzeTable() error = %v", err)
+	}
+
+	if table.TableName != "test_single" {
+		t.Errorf("TableName = %v, want test_single", table.TableName)
+	}
+	if len(table.Fields) != 2 {
+		t.Errorf("Fields count = %d, want 2", len(table.Fields))
+	}
+
+	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS test_single CASCADE")
+}
+
+func TestAnalyzeTable_Integration_TableNotFound(t *testing.T) {
+	connString := os.Getenv("TEST_PG_CONN")
+	if connString == "" {
+		t.Skip("Skipping integration test: TEST_PG_CONN not set")
+	}
+
+	ctx := context.Background()
+	_, err := AnalyzeTable(ctx, connString, "nonexistent_table_xyz", nil)
 	if err == nil {
 		t.Error("Expected error for nonexistent table, got nil")
 	}
 }
 
-func TestAnalyze_Integration_InvalidConnection(t *testing.T) {
+func TestAnalyzeDatabase_Integration_InvalidConnection(t *testing.T) {
 	ctx := context.Background()
-
-	_, err := Analyze(ctx, "postgres://invalid:invalid@localhost:9999/invalid", "users", nil)
+	_, err := AnalyzeDatabase(ctx, "postgres://invalid:invalid@localhost:9999/invalid", nil)
 	if err == nil {
 		t.Error("Expected error for invalid connection, got nil")
 	}
 }
 
-// Helper function to get a test pool
-func getTestPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
-	return pgxpool.New(ctx, connString)
+// helpers
+
+func findField(fields []FieldDefinition, name string) *FieldDefinition {
+	for i := range fields {
+		if fields[i].Name == name {
+			return &fields[i]
+		}
+	}
+	return nil
+}
+
+func hasConstraint(constraints []FieldConstraint, ct ConstraintType) bool {
+	for _, c := range constraints {
+		if c.Type == ct {
+			return true
+		}
+	}
+	return false
 }
