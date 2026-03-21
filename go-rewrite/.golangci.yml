@@ -28,6 +28,7 @@ linters-settings:
   govet:
     disable:
       - fieldalignment
+
   revive:
     rules:
       - name: blank-imports
