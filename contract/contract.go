@@ -17,12 +17,14 @@ type DataContract struct {
 // a database table, an API endpoint, or a file structure.
 type SchemaContract struct {
 	Name            string            `json:"name"`
+	Description     string            `json:"description,omitempty"`
 	Namespace       string            `json:"namespace,omitempty"`
 	RowCount        *int64            `json:"row_count,omitempty"`
 	Fields          []FieldDefinition `json:"fields"`
 	SampleData      [][]string        `json:"sample_data,omitempty"`
 	ValidationRules ValidationRules   `json:"validation_rules"`
 	Issues          []string          `json:"issues,omitempty"`
+	Metadata        map[string]any    `json:"metadata,omitempty"`
 }
 
 // FieldDefinition describes a single field in a schema.

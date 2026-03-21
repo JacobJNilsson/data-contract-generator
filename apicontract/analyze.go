@@ -12,6 +12,10 @@ import (
 	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
+// maxSchemaDepth limits recursion in schemaToReadable to prevent
+// infinite loops from circular $ref chains.
+const maxSchemaDepth = 10
+
 // Analyze fetches an OpenAPI spec from the given URL and produces a
 // DataContract describing every endpoint's request/response schema.
 func Analyze(ctx context.Context, specURL string) (*contract.DataContract, error) {
@@ -35,24 +39,19 @@ func AnalyzeSpec(raw map[string]any, specURL string) (*contract.DataContract, er
 		return nil, fmt.Errorf("not a valid OpenAPI/Swagger document: missing 'openapi' or 'swagger' key")
 	}
 
-	var schemas []contract.SchemaContract
-	var apiTitle string
-
+	var parser specParser
 	switch {
 	case strings.HasPrefix(version, "3"):
-		schemas = parseOpenAPI3(raw)
-		if info, ok := raw["info"].(map[string]any); ok {
-			apiTitle, _ = info["title"].(string)
-		}
+		parser = newOpenAPI3Parser(raw)
 	case strings.HasPrefix(version, "2"):
-		schemas = parseSwagger2(raw)
-		if info, ok := raw["info"].(map[string]any); ok {
-			apiTitle, _ = info["title"].(string)
-		}
+		parser = newSwagger2Parser(raw)
 	default:
 		return nil, fmt.Errorf("unsupported OpenAPI version: %s", version)
 	}
 
+	schemas := parser.parseEndpoints()
+
+	apiTitle := extractTitle(raw)
 	id := apiTitle
 	if id == "" {
 		id = specURL
@@ -71,54 +70,60 @@ func AnalyzeSpec(raw map[string]any, specURL string) (*contract.DataContract, er
 	}, nil
 }
 
-// --- spec fetching ----------------------------------------------------------
+// --- spec parser interface --------------------------------------------------
 
-func fetchSpec(ctx context.Context, specURL string) (map[string]any, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch spec: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("spec returned status %d: %s", resp.StatusCode, body)
-	}
-
-	var raw map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("parse spec JSON: %w", err)
-	}
-
-	return raw, nil
+// specParser abstracts the version-specific parts of OpenAPI parsing.
+type specParser interface {
+	parseEndpoints() []contract.SchemaContract
 }
 
-// --- version detection ------------------------------------------------------
-
-func detectVersion(raw map[string]any) string {
-	if v, ok := raw["openapi"].(string); ok {
-		return v
+// buildEndpointMeta extracts the shared metadata (summary, description)
+// from an OpenAPI operation. Version-specific parsers add request_body
+// and responses to the returned map.
+func buildEndpointMeta(op map[string]any) map[string]any {
+	meta := make(map[string]any)
+	if summary, ok := op["summary"].(string); ok && summary != "" {
+		meta["summary"] = summary
 	}
-	if v, ok := raw["swagger"].(string); ok {
-		return v
+	if desc, ok := op["description"].(string); ok && desc != "" {
+		meta["description"] = desc
+	}
+	return meta
+}
+
+// endpointDescription returns a short description, preferring summary
+// and falling back to description.
+func endpointDescription(op map[string]any) string {
+	if s, ok := op["summary"].(string); ok && s != "" {
+		return s
+	}
+	if d, ok := op["description"].(string); ok && d != "" {
+		return d
 	}
 	return ""
 }
 
-// --- OpenAPI 3.x parsing ----------------------------------------------------
+// --- OpenAPI 3.x parser -----------------------------------------------------
 
-func parseOpenAPI3(raw map[string]any) []contract.SchemaContract {
-	paths, _ := raw["paths"].(map[string]any)
+type openAPI3Parser struct {
+	raw      map[string]any
+	resolver refResolver
+}
 
-	// Build a ref resolver for components/schemas
-	resolver := buildRefResolver3(raw)
+func newOpenAPI3Parser(raw map[string]any) *openAPI3Parser {
+	components, _ := raw["components"].(map[string]any)
+	var schemas map[string]any
+	if components != nil {
+		schemas, _ = components["schemas"].(map[string]any)
+	}
+	return &openAPI3Parser{
+		raw:      raw,
+		resolver: refResolver{schemas: schemas},
+	}
+}
 
+func (p *openAPI3Parser) parseEndpoints() []contract.SchemaContract {
+	paths, _ := p.raw["paths"].(map[string]any)
 	var schemas []contract.SchemaContract
 
 	for _, path := range sortedKeys(paths) {
@@ -128,158 +133,202 @@ func parseOpenAPI3(raw map[string]any) []contract.SchemaContract {
 		}
 		for _, method := range sortedKeys(methodMap) {
 			op, ok := methodMap[method].(map[string]any)
-			if !ok {
-				continue
-			}
-			if !isHTTPMethod(method) {
+			if !ok || !isHTTPMethod(method) {
 				continue
 			}
 
-			schema := endpointToSchema3(method, path, op, resolver)
-			if len(schema.Fields) > 0 {
-				schemas = append(schemas, schema)
+			var fields []contract.FieldDefinition
+			var requiredFields []string
+			if isWriteMethod(method) {
+				fields, requiredFields = p.extractRequestBodyFields(op)
+			}
+			if len(fields) == 0 {
+				fields, requiredFields = p.extractResponseFields(op)
+			}
+
+			rules := contract.ValidationRules{}
+			if len(requiredFields) > 0 {
+				rules.RequiredFields = requiredFields
+			}
+
+			meta := buildEndpointMeta(op)
+			if reqBody := p.extractRequestBodyMeta(op); reqBody != nil {
+				meta["request_body"] = reqBody
+			}
+			if responses := p.extractResponsesMeta(op); len(responses) > 0 {
+				meta["responses"] = responses
+			}
+
+			sc := contract.SchemaContract{
+				Name:            strings.ToUpper(method) + " " + path,
+				Description:     endpointDescription(op),
+				Namespace:       "api",
+				Fields:          fields,
+				ValidationRules: rules,
+				Metadata:        meta,
+			}
+			if len(sc.Fields) > 0 {
+				schemas = append(schemas, sc)
 			}
 		}
 	}
-
 	return schemas
 }
 
-func endpointToSchema3(method, path string, op map[string]any, resolver refResolver) contract.SchemaContract {
-	name := strings.ToUpper(method) + " " + path
-	namespace := "api"
-
-	// For write methods, use request body schema
-	// For read methods, use 200 response schema
-	var fields []contract.FieldDefinition
-	var requiredFields []string
-
-	if isWriteMethod(method) {
-		fields, requiredFields = extractRequestBody3(op, resolver)
-	}
-	if len(fields) == 0 {
-		fields, requiredFields = extractResponseSchema3(op, resolver)
-	}
-
-	rules := contract.ValidationRules{}
-	if len(requiredFields) > 0 {
-		rules.RequiredFields = requiredFields
-	}
-
-	return contract.SchemaContract{
-		Name:            name,
-		Namespace:       namespace,
-		Fields:          fields,
-		ValidationRules: rules,
-	}
-}
-
-func extractRequestBody3(op map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
-	rb, ok := op["requestBody"].(map[string]any)
-	if !ok {
+func (p *openAPI3Parser) extractRequestBodyFields(op map[string]any) ([]contract.FieldDefinition, []string) {
+	schema := p.navigateToRequestSchema(op)
+	if schema == nil {
 		return nil, nil
 	}
+	return schemaToFields(schema, p.resolver)
+}
 
-	// Resolve $ref on requestBody itself
-	rb = resolveRef(rb, resolver)
+func (p *openAPI3Parser) extractResponseFields(op map[string]any) ([]contract.FieldDefinition, []string) {
+	schema := p.navigateToResponseSchema(op)
+	if schema == nil {
+		return nil, nil
+	}
+	return schemaToFields(schema, p.resolver)
+}
+
+func (p *openAPI3Parser) extractRequestBodyMeta(op map[string]any) map[string]any {
+	rb, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rb = resolveRef(rb, p.resolver)
 
 	content, ok := rb["content"].(map[string]any)
 	if !ok {
-		return nil, nil
+		return nil
 	}
-
-	// Prefer application/json
-	mediaType, ok := content["application/json"].(map[string]any)
-	if !ok {
-		// Try first available
-		for _, mt := range content {
-			mediaType, ok = mt.(map[string]any)
-			if ok {
-				break
-			}
-		}
-	}
+	mediaType := pickMediaType(content)
 	if mediaType == nil {
-		return nil, nil
+		return nil
 	}
 
-	schema, ok := mediaType["schema"].(map[string]any)
-	if !ok {
-		return nil, nil
+	result := map[string]any{}
+	if schema, ok := mediaType["schema"].(map[string]any); ok {
+		result["schema"] = schemaToReadable(resolveRef(schema, p.resolver), p.resolver, 0)
 	}
-
-	return schemaToFields(schema, resolver)
+	if example, ok := mediaType["example"]; ok {
+		result["example"] = example
+	}
+	if desc, ok := rb["description"].(string); ok && desc != "" {
+		result["description"] = desc
+	}
+	if required, ok := rb["required"].(bool); ok {
+		result["required"] = required
+	}
+	return result
 }
 
-func extractResponseSchema3(op map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
+func (p *openAPI3Parser) extractResponsesMeta(op map[string]any) map[string]any {
 	responses, ok := op["responses"].(map[string]any)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 
-	// Try 200, 201, then first 2xx
+	result := make(map[string]any)
+	for _, code := range sortedKeys(responses) {
+		resp, ok := responses[code].(map[string]any)
+		if !ok {
+			continue
+		}
+		resp = resolveRef(resp, p.resolver)
+
+		entry := map[string]any{}
+		if desc, ok := resp["description"].(string); ok && desc != "" {
+			entry["description"] = desc
+		}
+		if content, ok := resp["content"].(map[string]any); ok {
+			if mt := pickMediaType(content); mt != nil {
+				if schema, ok := mt["schema"].(map[string]any); ok {
+					entry["schema"] = schemaToReadable(resolveRef(schema, p.resolver), p.resolver, 0)
+				}
+				if example, ok := mt["example"]; ok {
+					entry["example"] = example
+				}
+			}
+		}
+		if len(entry) > 0 {
+			result[code] = entry
+		}
+	}
+	return result
+}
+
+// navigateToRequestSchema navigates to the JSON schema inside a v3 request body.
+func (p *openAPI3Parser) navigateToRequestSchema(op map[string]any) map[string]any {
+	rb, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rb = resolveRef(rb, p.resolver)
+	content, ok := rb["content"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	mt := pickMediaType(content)
+	if mt == nil {
+		return nil
+	}
+	schema, _ := mt["schema"].(map[string]any)
+	return schema
+}
+
+// navigateToResponseSchema navigates to the JSON schema inside a v3 200/201 response.
+func (p *openAPI3Parser) navigateToResponseSchema(op map[string]any) map[string]any {
+	responses, ok := op["responses"].(map[string]any)
+	if !ok {
+		return nil
+	}
 	for _, code := range []string{"200", "201"} {
-		if resp, ok := responses[code].(map[string]any); ok {
-			resp = resolveRef(resp, resolver)
-			if fields, req := extractResponseContent(resp, resolver); len(fields) > 0 {
-				return fields, req
+		resp, ok := responses[code].(map[string]any)
+		if !ok {
+			continue
+		}
+		resp = resolveRef(resp, p.resolver)
+		content, ok := resp["content"].(map[string]any)
+		if !ok {
+			continue
+		}
+		mt := pickMediaType(content)
+		if mt == nil {
+			continue
+		}
+		schema, ok := mt["schema"].(map[string]any)
+		if !ok {
+			continue
+		}
+		// Unwrap array responses to get the item schema for field extraction.
+		if t, _ := schema["type"].(string); t == "array" {
+			if items, ok := schema["items"].(map[string]any); ok {
+				return items
 			}
 		}
+		return schema
 	}
-
-	return nil, nil
+	return nil
 }
 
-func extractResponseContent(resp map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
-	content, ok := resp["content"].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
+// --- Swagger 2.0 parser -----------------------------------------------------
 
-	mediaType, ok := content["application/json"].(map[string]any)
-	if !ok {
-		for _, mt := range content {
-			mediaType, ok = mt.(map[string]any)
-			if ok {
-				break
-			}
-		}
-	}
-	if mediaType == nil {
-		return nil, nil
-	}
-
-	schema, ok := mediaType["schema"].(map[string]any)
-	if !ok {
-		return nil, nil
-	}
-
-	// If the response is an array, use the items schema
-	if schemaType, _ := schema["type"].(string); schemaType == "array" {
-		if items, ok := schema["items"].(map[string]any); ok {
-			schema = items
-		}
-	}
-
-	return schemaToFields(schema, resolver)
+type swagger2Parser struct {
+	raw      map[string]any
+	resolver refResolver
 }
 
-func buildRefResolver3(raw map[string]any) refResolver {
-	components, _ := raw["components"].(map[string]any)
-	if components == nil {
-		return refResolver{}
-	}
-	compSchemas, _ := components["schemas"].(map[string]any)
-	return refResolver{schemas: compSchemas}
-}
-
-// --- Swagger 2.0 parsing ----------------------------------------------------
-
-func parseSwagger2(raw map[string]any) []contract.SchemaContract {
-	paths, _ := raw["paths"].(map[string]any)
+func newSwagger2Parser(raw map[string]any) *swagger2Parser {
 	definitions, _ := raw["definitions"].(map[string]any)
-	resolver := refResolver{schemas: definitions}
+	return &swagger2Parser{
+		raw:      raw,
+		resolver: refResolver{schemas: definitions},
+	}
+}
 
+func (p *swagger2Parser) parseEndpoints() []contract.SchemaContract {
+	paths, _ := p.raw["paths"].(map[string]any)
 	var schemas []contract.SchemaContract
 
 	for _, path := range sortedKeys(paths) {
@@ -289,79 +338,147 @@ func parseSwagger2(raw map[string]any) []contract.SchemaContract {
 		}
 		for _, method := range sortedKeys(methodMap) {
 			op, ok := methodMap[method].(map[string]any)
-			if !ok {
-				continue
-			}
-			if !isHTTPMethod(method) {
+			if !ok || !isHTTPMethod(method) {
 				continue
 			}
 
-			schema := endpointToSchema2(method, path, op, resolver)
-			if len(schema.Fields) > 0 {
-				schemas = append(schemas, schema)
+			var fields []contract.FieldDefinition
+			var requiredFields []string
+			if isWriteMethod(method) {
+				fields, requiredFields = p.extractBodyParamFields(op)
+			}
+			if len(fields) == 0 {
+				fields, requiredFields = p.extractResponseFields(op)
+			}
+
+			rules := contract.ValidationRules{}
+			if len(requiredFields) > 0 {
+				rules.RequiredFields = requiredFields
+			}
+
+			meta := buildEndpointMeta(op)
+			if reqBody := p.extractBodyParamMeta(op); reqBody != nil {
+				meta["request_body"] = reqBody
+			}
+			if responses := p.extractResponsesMeta(op); len(responses) > 0 {
+				meta["responses"] = responses
+			}
+
+			sc := contract.SchemaContract{
+				Name:            strings.ToUpper(method) + " " + path,
+				Description:     endpointDescription(op),
+				Namespace:       "api",
+				Fields:          fields,
+				ValidationRules: rules,
+				Metadata:        meta,
+			}
+			if len(sc.Fields) > 0 {
+				schemas = append(schemas, sc)
 			}
 		}
 	}
-
 	return schemas
 }
 
-func endpointToSchema2(method, path string, op map[string]any, resolver refResolver) contract.SchemaContract {
-	name := strings.ToUpper(method) + " " + path
-	namespace := "api"
-
-	var fields []contract.FieldDefinition
-	var requiredFields []string
-
-	if isWriteMethod(method) {
-		fields, requiredFields = extractBodyParam2(op, resolver)
-	}
-	if len(fields) == 0 {
-		fields, requiredFields = extractResponseSchema2(op, resolver)
-	}
-
-	rules := contract.ValidationRules{}
-	if len(requiredFields) > 0 {
-		rules.RequiredFields = requiredFields
-	}
-
-	return contract.SchemaContract{
-		Name:            name,
-		Namespace:       namespace,
-		Fields:          fields,
-		ValidationRules: rules,
-	}
-}
-
-func extractBodyParam2(op map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
-	params, ok := op["parameters"].([]any)
-	if !ok {
+func (p *swagger2Parser) extractBodyParamFields(op map[string]any) ([]contract.FieldDefinition, []string) {
+	schema := p.navigateToBodyParamSchema(op)
+	if schema == nil {
 		return nil, nil
 	}
+	return schemaToFields(schema, p.resolver)
+}
 
-	for _, p := range params {
-		param, ok := p.(map[string]any)
+func (p *swagger2Parser) extractResponseFields(op map[string]any) ([]contract.FieldDefinition, []string) {
+	schema := p.navigateToResponseSchema(op)
+	if schema == nil {
+		return nil, nil
+	}
+	return schemaToFields(schema, p.resolver)
+}
+
+func (p *swagger2Parser) extractBodyParamMeta(op map[string]any) map[string]any {
+	params, ok := op["parameters"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, param := range params {
+		pm, ok := param.(map[string]any)
 		if !ok {
 			continue
 		}
-		if in, _ := param["in"].(string); in == "body" {
-			schema, ok := param["schema"].(map[string]any)
-			if !ok {
-				continue
-			}
-			return schemaToFields(schema, resolver)
+		if in, _ := pm["in"].(string); in != "body" {
+			continue
 		}
+		schema, ok := pm["schema"].(map[string]any)
+		if !ok {
+			continue
+		}
+		result := map[string]any{
+			"schema": schemaToReadable(schema, p.resolver, 0),
+		}
+		if desc, ok := pm["description"].(string); ok && desc != "" {
+			result["description"] = desc
+		}
+		return result
 	}
-
-	return nil, nil
+	return nil
 }
 
-func extractResponseSchema2(op map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
+func (p *swagger2Parser) extractResponsesMeta(op map[string]any) map[string]any {
 	responses, ok := op["responses"].(map[string]any)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 
+	result := make(map[string]any)
+	for _, code := range sortedKeys(responses) {
+		resp, ok := responses[code].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		entry := map[string]any{}
+		if desc, ok := resp["description"].(string); ok && desc != "" {
+			entry["description"] = desc
+		}
+		if schema, ok := resp["schema"].(map[string]any); ok {
+			entry["schema"] = schemaToReadable(resolveRef(schema, p.resolver), p.resolver, 0)
+		}
+		if examples, ok := resp["examples"].(map[string]any); ok {
+			if jsonExample, ok := examples["application/json"]; ok {
+				entry["example"] = jsonExample
+			}
+		}
+		if len(entry) > 0 {
+			result[code] = entry
+		}
+	}
+	return result
+}
+
+func (p *swagger2Parser) navigateToBodyParamSchema(op map[string]any) map[string]any {
+	params, ok := op["parameters"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, param := range params {
+		pm, ok := param.(map[string]any)
+		if !ok {
+			continue
+		}
+		if in, _ := pm["in"].(string); in == "body" {
+			schema, _ := pm["schema"].(map[string]any)
+			return schema
+		}
+	}
+	return nil
+}
+
+func (p *swagger2Parser) navigateToResponseSchema(op map[string]any) map[string]any {
+	responses, ok := op["responses"].(map[string]any)
+	if !ok {
+		return nil
+	}
 	for _, code := range []string{"200", "201"} {
 		resp, ok := responses[code].(map[string]any)
 		if !ok {
@@ -371,21 +488,17 @@ func extractResponseSchema2(op map[string]any, resolver refResolver) ([]contract
 		if !ok {
 			continue
 		}
-		// If array response, use items
 		if t, _ := schema["type"].(string); t == "array" {
 			if items, ok := schema["items"].(map[string]any); ok {
-				schema = items
+				return items
 			}
 		}
-		if fields, req := schemaToFields(schema, resolver); len(fields) > 0 {
-			return fields, req
-		}
+		return schema
 	}
-
-	return nil, nil
+	return nil
 }
 
-// --- shared schema-to-fields conversion -------------------------------------
+// --- shared schema handling -------------------------------------------------
 
 // refResolver holds the schema definitions for resolving $ref pointers.
 type refResolver struct {
@@ -397,7 +510,6 @@ func resolveRef(obj map[string]any, resolver refResolver) map[string]any {
 	if !ok {
 		return obj
 	}
-	// Extract the schema name from "#/components/schemas/Foo" or "#/definitions/Foo"
 	parts := strings.Split(ref, "/")
 	name := parts[len(parts)-1]
 	if resolved, ok := resolver.schemas[name].(map[string]any); ok {
@@ -406,6 +518,7 @@ func resolveRef(obj map[string]any, resolver refResolver) map[string]any {
 	return obj
 }
 
+// schemaToFields converts an OpenAPI schema to FieldDefinitions (flat, top-level only).
 func schemaToFields(schema map[string]any, resolver refResolver) ([]contract.FieldDefinition, []string) {
 	schema = resolveRef(schema, resolver)
 
@@ -414,7 +527,6 @@ func schemaToFields(schema map[string]any, resolver refResolver) ([]contract.Fie
 		return nil, nil
 	}
 
-	// Collect required fields
 	requiredSet := make(map[string]bool)
 	if req, ok := schema["required"].([]any); ok {
 		for _, r := range req {
@@ -424,9 +536,7 @@ func schemaToFields(schema map[string]any, resolver refResolver) ([]contract.Fie
 		}
 	}
 
-	// Sort property names for deterministic output
 	propNames := sortedKeys(props)
-
 	fields := make([]contract.FieldDefinition, 0, len(propNames))
 	var requiredFields []string
 
@@ -442,22 +552,62 @@ func schemaToFields(schema map[string]any, resolver refResolver) ([]contract.Fie
 			DataType: mapOpenAPIType(propRaw),
 			Nullable: !requiredSet[name],
 		}
-
 		if desc, ok := propRaw["description"].(string); ok && desc != "" {
 			field.Description = &desc
 		}
-
 		if requiredSet[name] {
 			field.Constraints = append(field.Constraints, contract.FieldConstraint{
 				Type: contract.ConstraintNotNull,
 			})
 			requiredFields = append(requiredFields, name)
 		}
-
 		fields = append(fields, field)
 	}
 
 	return fields, requiredFields
+}
+
+// schemaToReadable converts an OpenAPI schema to a nested readable
+// representation for display. It resolves $ref pointers and recurses
+// into properties and array items, with depth limiting to prevent
+// infinite loops on circular references.
+func schemaToReadable(schema map[string]any, resolver refResolver, depth int) map[string]any {
+	if depth >= maxSchemaDepth {
+		return map[string]any{"_truncated": "max depth reached"}
+	}
+
+	schema = resolveRef(schema, resolver)
+	result := map[string]any{}
+
+	for _, key := range []string{"type", "format", "description", "example"} {
+		if v, ok := schema[key]; ok {
+			result[key] = v
+		}
+	}
+	if enum, ok := schema["enum"].([]any); ok {
+		result["enum"] = enum
+	}
+	if req, ok := schema["required"].([]any); ok {
+		result["required"] = req
+	}
+
+	if props, ok := schema["properties"].(map[string]any); ok {
+		propMap := make(map[string]any)
+		for _, pname := range sortedKeys(props) {
+			propRaw, ok := props[pname].(map[string]any)
+			if !ok {
+				continue
+			}
+			propMap[pname] = schemaToReadable(propRaw, resolver, depth+1)
+		}
+		result["properties"] = propMap
+	}
+
+	if items, ok := schema["items"].(map[string]any); ok {
+		result["items"] = schemaToReadable(items, resolver, depth+1)
+	}
+
+	return result
 }
 
 // mapOpenAPIType converts OpenAPI type+format to a contract data type.
@@ -465,7 +615,6 @@ func mapOpenAPIType(prop map[string]any) string {
 	format, _ := prop["format"].(string)
 	typ, _ := prop["type"].(string)
 
-	// Format takes priority (more specific)
 	switch format {
 	case "int32", "int64":
 		return "integer"
@@ -511,6 +660,51 @@ func mapOpenAPIType(prop map[string]any) string {
 
 // --- helpers ----------------------------------------------------------------
 
+func fetchSpec(ctx context.Context, specURL string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch spec: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("spec returned status %d: %s", resp.StatusCode, body)
+	}
+
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("parse spec JSON: %w", err)
+	}
+
+	return raw, nil
+}
+
+func detectVersion(raw map[string]any) string {
+	if v, ok := raw["openapi"].(string); ok {
+		return v
+	}
+	if v, ok := raw["swagger"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func extractTitle(raw map[string]any) string {
+	if info, ok := raw["info"].(map[string]any); ok {
+		if title, ok := info["title"].(string); ok {
+			return title
+		}
+	}
+	return ""
+}
+
 func isHTTPMethod(method string) bool {
 	switch strings.ToLower(method) {
 	case "get", "post", "put", "patch", "delete", "head", "options":
@@ -525,6 +719,20 @@ func isWriteMethod(method string) bool {
 		return true
 	}
 	return false
+}
+
+// pickMediaType selects application/json or falls back to the first
+// available media type (sorted alphabetically for determinism).
+func pickMediaType(content map[string]any) map[string]any {
+	if mt, ok := content["application/json"].(map[string]any); ok {
+		return mt
+	}
+	for _, key := range sortedKeys(content) {
+		if m, ok := content[key].(map[string]any); ok {
+			return m
+		}
+	}
+	return nil
 }
 
 func sortedKeys(m map[string]any) []string {
