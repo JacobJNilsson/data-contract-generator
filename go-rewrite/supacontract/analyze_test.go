@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jacobjnilsson/contract-gen/contract"
 )
 
 // sampleOpenAPISpec returns a realistic PostgREST OpenAPI spec for testing.
@@ -237,7 +239,7 @@ func TestBuildField(t *testing.T) {
 	if field.Description == nil || *field.Description != "Primary key" {
 		t.Errorf("Description = %v, want 'Primary key'", field.Description)
 	}
-	if len(field.Constraints) != 1 || field.Constraints[0].Type != ConstraintNotNull {
+	if len(field.Constraints) != 1 || field.Constraints[0].Type != contract.ConstraintNotNull {
 		t.Errorf("Constraints = %v, want [not_null]", field.Constraints)
 	}
 }
@@ -285,7 +287,7 @@ func TestParseTables(t *testing.T) {
 
 	// Verify orders table has array type
 	orders := tables[0]
-	var tagsField *FieldDefinition
+	var tagsField *contract.FieldDefinition
 	for i := range orders.Fields {
 		if orders.Fields[i].Name == "tags" {
 			tagsField = &orders.Fields[i]

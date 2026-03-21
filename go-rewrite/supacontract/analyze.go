@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/jacobjnilsson/contract-gen/contract"
 )
 
 // AnalyzeDatabase fetches the PostgREST OpenAPI spec from a Supabase project
 // and returns a DatabaseContract describing every exposed table.
-func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DataContract, error) {
+func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*contract.DataContract, error) {
 	if err := validateProjectURL(projectURL); err != nil {
 		return nil, err
 	}
@@ -25,7 +27,7 @@ func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DataContr
 
 // analyzeFromURL does the actual work. Separated from AnalyzeDatabase so
 // tests can bypass URL validation and point at httptest servers.
-func analyzeFromURL(ctx context.Context, baseURL, apiKey, projectID string) (*DataContract, error) {
+func analyzeFromURL(ctx context.Context, baseURL, apiKey, projectID string) (*contract.DataContract, error) {
 	spec, err := fetchOpenAPISpec(ctx, baseURL, apiKey)
 	if err != nil {
 		return nil, err
@@ -33,7 +35,7 @@ func analyzeFromURL(ctx context.Context, baseURL, apiKey, projectID string) (*Da
 
 	schemas := parseTables(spec)
 
-	return &DataContract{
+	return &contract.DataContract{
 		ContractType: "destination",
 		ID:           projectID,
 		Schemas:      schemas,
@@ -133,10 +135,10 @@ func fetchOpenAPISpec(ctx context.Context, projectURL, apiKey string) (*openAPIS
 }
 
 // parseTables extracts SchemaContracts from the OpenAPI spec.
-func parseTables(spec *openAPISpec) []SchemaContract {
+func parseTables(spec *openAPISpec) []contract.SchemaContract {
 	tableNames := extractTableNames(spec.Paths)
 
-	tables := make([]SchemaContract, 0, len(tableNames))
+	tables := make([]contract.SchemaContract, 0, len(tableNames))
 	for _, name := range tableNames {
 		def, ok := spec.Definitions[name]
 		if !ok {
@@ -170,7 +172,7 @@ func extractTableNames(paths map[string]any) []string {
 }
 
 // buildTable converts an OpenAPI schema definition into a SchemaContract.
-func buildTable(name string, def schemaObject) SchemaContract {
+func buildTable(name string, def schemaObject) contract.SchemaContract {
 	requiredSet := make(map[string]bool, len(def.Required))
 	for _, r := range def.Required {
 		requiredSet[r] = true
@@ -183,7 +185,7 @@ func buildTable(name string, def schemaObject) SchemaContract {
 	}
 	sort.Strings(propNames)
 
-	fields := make([]FieldDefinition, 0, len(propNames))
+	fields := make([]contract.FieldDefinition, 0, len(propNames))
 	for _, pname := range propNames {
 		prop := def.Properties[pname]
 		field := buildField(pname, prop, requiredSet[pname])
@@ -192,7 +194,7 @@ func buildTable(name string, def schemaObject) SchemaContract {
 
 	rules := buildRules(fields)
 
-	return SchemaContract{
+	return contract.SchemaContract{
 		Name:            name,
 		Namespace:       "public",
 		Fields:          fields,
@@ -201,10 +203,10 @@ func buildTable(name string, def schemaObject) SchemaContract {
 }
 
 // buildField converts an OpenAPI property into a FieldDefinition.
-func buildField(name string, prop propertyObject, required bool) FieldDefinition {
+func buildField(name string, prop propertyObject, required bool) contract.FieldDefinition {
 	nullable := !required
 
-	field := FieldDefinition{
+	field := contract.FieldDefinition{
 		Name:     name,
 		DataType: mapOpenAPIType(prop),
 		Nullable: nullable,
@@ -217,8 +219,8 @@ func buildField(name string, prop propertyObject, required bool) FieldDefinition
 
 	// Build constraints
 	if required {
-		field.Constraints = append(field.Constraints, FieldConstraint{
-			Type: ConstraintNotNull,
+		field.Constraints = append(field.Constraints, contract.FieldConstraint{
+			Type: contract.ConstraintNotNull,
 		})
 	}
 
@@ -295,8 +297,8 @@ func mapOpenAPIType(prop propertyObject) string {
 }
 
 // buildRules creates validation rules from fields.
-func buildRules(fields []FieldDefinition) ValidationRules {
-	var rules ValidationRules
+func buildRules(fields []contract.FieldDefinition) contract.ValidationRules {
+	var rules contract.ValidationRules
 	for _, f := range fields {
 		if !f.Nullable {
 			rules.RequiredFields = append(rules.RequiredFields, f.Name)
