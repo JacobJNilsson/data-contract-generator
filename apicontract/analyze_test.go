@@ -731,6 +731,448 @@ func TestAnalyzeSpec_SchemaPropertyNotMap(t *testing.T) {
 	}
 }
 
+// --- Metadata extraction tests ----------------------------------------------
+
+func TestAnalyzeSpec_OpenAPI3_ExtractsMetadata(t *testing.T) {
+	spec := map[string]any{
+		"openapi": "3.0.0",
+		"info":    map[string]any{"title": "Rich API"},
+		"paths": map[string]any{
+			"/pets": map[string]any{
+				"post": map[string]any{
+					"summary":     "Create a pet",
+					"description": "Creates a new pet in the store",
+					"requestBody": map[string]any{
+						"description": "Pet to create",
+						"required":    true,
+						"content": map[string]any{
+							"application/json": map[string]any{
+								"schema": map[string]any{
+									"type":     "object",
+									"required": []any{"name"},
+									"properties": map[string]any{
+										"name": map[string]any{"type": "string", "description": "Pet name"},
+										"tag":  map[string]any{"type": "string", "enum": []any{"dog", "cat", "bird"}},
+									},
+								},
+								"example": map[string]any{"name": "Fido", "tag": "dog"},
+							},
+						},
+					},
+					"responses": map[string]any{
+						"201": map[string]any{
+							"description": "Pet created",
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": map[string]any{
+										"type": "object",
+										"properties": map[string]any{
+											"id":   map[string]any{"type": "integer"},
+											"name": map[string]any{"type": "string"},
+										},
+									},
+									"example": map[string]any{"id": float64(1), "name": "Fido"},
+								},
+							},
+						},
+						"400": map[string]any{
+							"description": "Invalid input",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	dc, err := AnalyzeSpec(spec, "test")
+	if err != nil {
+		t.Fatalf("AnalyzeSpec: %v", err)
+	}
+
+	postPets := findSchema(dc.Schemas, "POST /pets")
+	if postPets == nil {
+		t.Fatal("POST /pets not found")
+	}
+
+	if postPets.Description != "Create a pet" {
+		t.Errorf("description = %q, want 'Create a pet'", postPets.Description)
+	}
+
+	responses, ok := postPets.Metadata["responses"].(map[string]any)
+	if !ok {
+		t.Fatal("expected responses in metadata")
+	}
+	resp201, ok := responses["201"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 201 response")
+	}
+	if resp201["description"] != "Pet created" {
+		t.Errorf("201 description = %v", resp201["description"])
+	}
+	respSchema, ok := resp201["schema"].(map[string]any)
+	if !ok {
+		t.Fatal("expected schema in 201 response")
+	}
+	// Verify the schema content, not just existence.
+	respProps, ok := respSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties in 201 response schema")
+	}
+	if _, ok := respProps["id"]; !ok {
+		t.Error("expected 'id' property in 201 response schema")
+	}
+	if _, ok := respProps["name"]; !ok {
+		t.Error("expected 'name' property in 201 response schema")
+	}
+
+	respExample, ok := resp201["example"].(map[string]any)
+	if !ok {
+		t.Fatal("expected example in 201 response")
+	}
+	if respExample["name"] != "Fido" {
+		t.Errorf("201 example name = %v, want 'Fido'", respExample["name"])
+	}
+
+	resp400, ok := responses["400"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 400 response")
+	}
+	if resp400["description"] != "Invalid input" {
+		t.Errorf("400 description = %v", resp400["description"])
+	}
+
+	reqBody, ok := postPets.Metadata["request_body"].(map[string]any)
+	if !ok {
+		t.Fatal("expected request_body in metadata")
+	}
+	if reqBody["example"] == nil {
+		t.Error("expected example in request_body")
+	}
+	if reqBody["schema"] == nil {
+		t.Error("expected schema in request_body")
+	}
+}
+
+func TestAnalyzeSpec_Swagger2_ExtractsMetadata(t *testing.T) {
+	spec := map[string]any{
+		"swagger": "2.0",
+		"info":    map[string]any{"title": "Rich API v2"},
+		"paths": map[string]any{
+			"/pets": map[string]any{
+				"post": map[string]any{
+					"summary":     "Add a pet",
+					"description": "Adds a new pet",
+					"parameters": []any{
+						map[string]any{
+							"in":          "body",
+							"name":        "body",
+							"description": "Pet object",
+							"schema":      map[string]any{"$ref": "#/definitions/Pet"},
+						},
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "OK",
+							"schema":      map[string]any{"$ref": "#/definitions/Pet"},
+							"examples": map[string]any{
+								"application/json": map[string]any{"name": "Rex"},
+							},
+						},
+					},
+				},
+				"get": map[string]any{
+					"summary": "List pets",
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "List of pets",
+							"schema": map[string]any{
+								"type":  "array",
+								"items": map[string]any{"$ref": "#/definitions/Pet"},
+							},
+						},
+					},
+				},
+			},
+		},
+		"definitions": map[string]any{
+			"Pet": map[string]any{
+				"type":     "object",
+				"required": []any{"name"},
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string"},
+					"tag":  map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+
+	dc, err := AnalyzeSpec(spec, "test")
+	if err != nil {
+		t.Fatalf("AnalyzeSpec: %v", err)
+	}
+
+	postPets := findSchema(dc.Schemas, "POST /pets")
+	if postPets == nil {
+		t.Fatal("POST /pets not found")
+	}
+
+	if postPets.Description != "Add a pet" {
+		t.Errorf("description = %q, want 'Add a pet'", postPets.Description)
+	}
+
+	responses, ok := postPets.Metadata["responses"].(map[string]any)
+	if !ok {
+		t.Fatal("expected responses in metadata")
+	}
+	resp200, ok := responses["200"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 200 response")
+	}
+	if resp200["example"] == nil {
+		t.Error("expected example in 200 response")
+	}
+	if resp200["schema"] == nil {
+		t.Error("expected schema in 200 response")
+	}
+
+	reqBody, ok := postPets.Metadata["request_body"].(map[string]any)
+	if !ok {
+		t.Fatal("expected request_body in metadata")
+	}
+	if reqBody["description"] != "Pet object" {
+		t.Errorf("request_body description = %v", reqBody["description"])
+	}
+
+	getPets := findSchema(dc.Schemas, "GET /pets")
+	if getPets == nil {
+		t.Fatal("GET /pets not found")
+	}
+	getResponses, ok := getPets.Metadata["responses"].(map[string]any)
+	if !ok {
+		t.Fatal("expected responses in GET metadata")
+	}
+	getResp200, ok := getResponses["200"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 200 in GET responses")
+	}
+	getSchema, ok := getResp200["schema"].(map[string]any)
+	if !ok {
+		t.Fatal("expected schema in GET 200")
+	}
+	if getSchema["type"] != "array" {
+		t.Errorf("GET response schema type = %v, want array", getSchema["type"])
+	}
+}
+
+func TestSchemaToReadable(t *testing.T) {
+	schema := map[string]any{
+		"type":        "object",
+		"description": "A pet",
+		"required":    []any{"name"},
+		"properties": map[string]any{
+			"name": map[string]any{
+				"type":        "string",
+				"description": "Pet name",
+				"example":     "Fido",
+			},
+			"tags": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
+			"status": map[string]any{
+				"type": "string",
+				"enum": []any{"available", "sold"},
+			},
+		},
+	}
+
+	result := schemaToReadable(schema, refResolver{}, 0)
+
+	if result["type"] != "object" {
+		t.Errorf("type = %v, want object", result["type"])
+	}
+	if result["description"] != "A pet" {
+		t.Errorf("description = %v", result["description"])
+	}
+
+	props, ok := result["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties")
+	}
+	nameProp, ok := props["name"].(map[string]any)
+	if !ok {
+		t.Fatal("expected name property")
+	}
+	if nameProp["example"] != "Fido" {
+		t.Errorf("name example = %v", nameProp["example"])
+	}
+
+	tagsProp, ok := props["tags"].(map[string]any)
+	if !ok {
+		t.Fatal("expected tags property")
+	}
+	if tagsProp["items"] == nil {
+		t.Error("expected items in tags")
+	}
+
+	statusProp, ok := props["status"].(map[string]any)
+	if !ok {
+		t.Fatal("expected status property")
+	}
+	if statusProp["enum"] == nil {
+		t.Error("expected enum in status")
+	}
+}
+
+func TestSchemaToReadable_CircularRef(t *testing.T) {
+	// A schema that references itself should not infinite loop.
+	definitions := map[string]any{
+		"Tree": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string"},
+				"children": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"$ref": "#/definitions/Tree"},
+				},
+			},
+		},
+	}
+	resolver := refResolver{schemas: definitions}
+	schema := definitions["Tree"].(map[string]any)
+
+	// Should complete without stack overflow.
+	result := schemaToReadable(schema, resolver, 0)
+
+	if result["type"] != "object" {
+		t.Errorf("type = %v, want object", result["type"])
+	}
+	// At some depth, it should truncate.
+	props, ok := result["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties")
+	}
+	if _, ok := props["children"]; !ok {
+		t.Error("expected children property")
+	}
+}
+
+func TestSchemaToReadable_WithRef(t *testing.T) {
+	definitions := map[string]any{
+		"Address": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"city": map[string]any{"type": "string", "description": "City name"},
+			},
+		},
+	}
+	resolver := refResolver{schemas: definitions}
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"home": map[string]any{"$ref": "#/definitions/Address"},
+		},
+	}
+
+	result := schemaToReadable(schema, resolver, 0)
+	props, ok := result["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected properties")
+	}
+	home, ok := props["home"].(map[string]any)
+	if !ok {
+		t.Fatal("expected home property")
+	}
+	// Should have resolved the ref and show Address properties.
+	homeProps, ok := home["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("expected resolved Address properties")
+	}
+	city, ok := homeProps["city"].(map[string]any)
+	if !ok {
+		t.Fatal("expected city property")
+	}
+	if city["description"] != "City name" {
+		t.Errorf("city description = %v, want 'City name'", city["description"])
+	}
+}
+
+func TestPickMediaType(t *testing.T) {
+	tests := []struct {
+		name    string
+		content map[string]any
+		wantNil bool
+		wantKey string
+	}{
+		{
+			name:    "prefers application/json",
+			content: map[string]any{"text/xml": map[string]any{"x": 1}, "application/json": map[string]any{"x": 2}},
+			wantKey: "application/json",
+		},
+		{
+			name:    "falls back to first alphabetically",
+			content: map[string]any{"text/xml": map[string]any{"x": 1}, "application/xml": map[string]any{"x": 2}},
+			wantKey: "application/xml",
+		},
+		{
+			name:    "empty content",
+			content: map[string]any{},
+			wantNil: true,
+		},
+		{
+			name:    "non-map values skipped",
+			content: map[string]any{"text/plain": "not a map"},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pickMediaType(tt.content)
+			if tt.wantNil {
+				if result != nil {
+					t.Errorf("expected nil, got %v", result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatal("expected non-nil result")
+			}
+		})
+	}
+}
+
+func TestEndpointDescription_FallbackToDescription(t *testing.T) {
+	op := map[string]any{
+		"description": "Detailed description only",
+	}
+	got := endpointDescription(op)
+	if got != "Detailed description only" {
+		t.Errorf("endpointDescription() = %q, want 'Detailed description only'", got)
+	}
+}
+
+func TestEndpointDescription_PrefersSummary(t *testing.T) {
+	op := map[string]any{
+		"summary":     "Short summary",
+		"description": "Long description",
+	}
+	got := endpointDescription(op)
+	if got != "Short summary" {
+		t.Errorf("endpointDescription() = %q, want 'Short summary'", got)
+	}
+}
+
+func TestEndpointDescription_Empty(t *testing.T) {
+	got := endpointDescription(map[string]any{})
+	if got != "" {
+		t.Errorf("endpointDescription() = %q, want empty", got)
+	}
+}
+
 // --- Test fixtures ----------------------------------------------------------
 
 func openAPI3Spec() map[string]any {
