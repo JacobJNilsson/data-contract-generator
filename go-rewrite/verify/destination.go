@@ -5,16 +5,16 @@ import (
 	"fmt"
 )
 
-// destinationContract mirrors pgcontract.DatabaseContract for validation.
+// destinationContract mirrors contract.DataContract for validation.
 type destinationContract struct {
-	DatabaseID string         `json:"database_id"`
-	Tables     []destTable    `json:"tables"`
-	Metadata   map[string]any `json:"metadata"`
+	ID       string         `json:"id"`
+	Schemas  []destSchema   `json:"schemas"`
+	Metadata map[string]any `json:"metadata"`
 }
 
-type destTable struct {
-	TableName       string         `json:"table_name"`
-	Schema          string         `json:"schema"`
+type destSchema struct {
+	Name            string         `json:"name"`
+	Namespace       string         `json:"namespace"`
 	RowCount        *int64         `json:"row_count"`
 	Fields          []destField    `json:"fields"`
 	ValidationRules destValidation `json:"validation_rules"`
@@ -68,43 +68,43 @@ func verifyDestination(data []byte) []string {
 
 	// --- structural checks ---
 
-	if dc.DatabaseID == "" {
-		issues = append(issues, "missing database_id")
+	if dc.ID == "" {
+		issues = append(issues, "missing id")
 	}
 
-	if len(dc.Tables) == 0 {
-		issues = append(issues, "no tables defined")
+	if len(dc.Schemas) == 0 {
+		issues = append(issues, "no schemas defined")
 	}
 
-	tableNames := make(map[string]bool, len(dc.Tables))
-	for i, table := range dc.Tables {
-		prefix := fmt.Sprintf("tables[%d]", i)
+	schemaNames := make(map[string]bool, len(dc.Schemas))
+	for i, schema := range dc.Schemas {
+		prefix := fmt.Sprintf("schemas[%d]", i)
 
 		switch {
-		case table.TableName == "":
-			issues = append(issues, prefix+": missing table_name")
-		case tableNames[table.TableName]:
-			issues = append(issues, fmt.Sprintf("%s: duplicate table_name %q", prefix, table.TableName))
+		case schema.Name == "":
+			issues = append(issues, prefix+": missing name")
+		case schemaNames[schema.Name]:
+			issues = append(issues, fmt.Sprintf("%s: duplicate name %q", prefix, schema.Name))
 		default:
-			tableNames[table.TableName] = true
+			schemaNames[schema.Name] = true
 		}
 
-		if table.RowCount != nil && *table.RowCount < 0 {
+		if schema.RowCount != nil && *schema.RowCount < 0 {
 			issues = append(issues, fmt.Sprintf("%s: row_count is negative", prefix))
 		}
 
-		issues = append(issues, verifyDestFields(prefix, table)...)
+		issues = append(issues, verifyDestFields(prefix, schema)...)
 	}
 
 	return issues
 }
 
-// verifyDestFields validates a table's fields and cross-references.
-func verifyDestFields(prefix string, table destTable) []string {
+// verifyDestFields validates a schema's fields and cross-references.
+func verifyDestFields(prefix string, schema destSchema) []string {
 	var issues []string
 
-	fieldNames := make(map[string]bool, len(table.Fields))
-	for i, f := range table.Fields {
+	fieldNames := make(map[string]bool, len(schema.Fields))
+	for i, f := range schema.Fields {
 		fp := fmt.Sprintf("%s.fields[%d]", prefix, i)
 
 		switch {
@@ -132,7 +132,7 @@ func verifyDestFields(prefix string, table destTable) []string {
 	// --- semantic checks ---
 
 	// required_fields must reference real field names.
-	for _, name := range table.ValidationRules.RequiredFields {
+	for _, name := range schema.ValidationRules.RequiredFields {
 		if !fieldNames[name] {
 			issues = append(issues, fmt.Sprintf(
 				"%s.validation_rules: required_fields references unknown field %q", prefix, name))
@@ -140,7 +140,7 @@ func verifyDestFields(prefix string, table destTable) []string {
 	}
 
 	// unique_constraints must reference real field names.
-	for _, name := range table.ValidationRules.UniqueConstraints {
+	for _, name := range schema.ValidationRules.UniqueConstraints {
 		if !fieldNames[name] {
 			issues = append(issues, fmt.Sprintf(
 				"%s.validation_rules: unique_constraints references unknown field %q", prefix, name))
@@ -148,7 +148,7 @@ func verifyDestFields(prefix string, table destTable) []string {
 	}
 
 	// A non-nullable field should not have a profile showing nulls.
-	for _, f := range table.Fields {
+	for _, f := range schema.Fields {
 		if !f.Nullable {
 			// Check if there's a not_null constraint (should be present).
 			hasNotNull := false

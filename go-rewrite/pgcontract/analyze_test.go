@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+
+	"github.com/jacobjnilsson/contract-gen/contract"
 )
 
 func TestNormalizeDataType(t *testing.T) {
@@ -88,33 +90,33 @@ func TestSanitizeConnString(t *testing.T) {
 func TestApplyConstraints(t *testing.T) {
 	tests := []struct {
 		name        string
-		fields      []FieldDefinition
+		fields      []contract.FieldDefinition
 		constraints []constraintInfo
-		want        []FieldDefinition
+		want        []contract.FieldDefinition
 	}{
 		{
 			name: "primary key constraint",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "id", DataType: "integer", Nullable: false},
 			},
 			constraints: []constraintInfo{
 				{ColumnName: "id", ConstraintType: "PRIMARY KEY"},
 			},
-			want: []FieldDefinition{
+			want: []contract.FieldDefinition{
 				{
 					Name:     "id",
 					DataType: "integer",
 					Nullable: false,
-					Constraints: []FieldConstraint{
-						{Type: ConstraintPrimaryKey},
-						{Type: ConstraintNotNull},
+					Constraints: []contract.FieldConstraint{
+						{Type: contract.ConstraintPrimaryKey},
+						{Type: contract.ConstraintNotNull},
 					},
 				},
 			},
 		},
 		{
 			name: "foreign key constraint",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "user_id", DataType: "integer", Nullable: true},
 			},
 			constraints: []constraintInfo{
@@ -125,14 +127,14 @@ func TestApplyConstraints(t *testing.T) {
 					RefColumn:      strPtr("id"),
 				},
 			},
-			want: []FieldDefinition{
+			want: []contract.FieldDefinition{
 				{
 					Name:     "user_id",
 					DataType: "integer",
 					Nullable: true,
-					Constraints: []FieldConstraint{
+					Constraints: []contract.FieldConstraint{
 						{
-							Type:           ConstraintForeignKey,
+							Type:           contract.ConstraintForeignKey,
 							ReferredTable:  strPtr("users"),
 							ReferredColumn: strPtr("id"),
 						},
@@ -142,48 +144,48 @@ func TestApplyConstraints(t *testing.T) {
 		},
 		{
 			name: "unique constraint",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "email", DataType: "text", Nullable: false},
 			},
 			constraints: []constraintInfo{
 				{ColumnName: "email", ConstraintType: "UNIQUE"},
 			},
-			want: []FieldDefinition{
+			want: []contract.FieldDefinition{
 				{
 					Name:     "email",
 					DataType: "text",
 					Nullable: false,
-					Constraints: []FieldConstraint{
-						{Type: ConstraintUnique},
-						{Type: ConstraintNotNull},
+					Constraints: []contract.FieldConstraint{
+						{Type: contract.ConstraintUnique},
+						{Type: contract.ConstraintNotNull},
 					},
 				},
 			},
 		},
 		{
 			name: "no constraints but not null",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "name", DataType: "text", Nullable: false},
 			},
 			constraints: []constraintInfo{},
-			want: []FieldDefinition{
+			want: []contract.FieldDefinition{
 				{
 					Name:     "name",
 					DataType: "text",
 					Nullable: false,
-					Constraints: []FieldConstraint{
-						{Type: ConstraintNotNull},
+					Constraints: []contract.FieldConstraint{
+						{Type: contract.ConstraintNotNull},
 					},
 				},
 			},
 		},
 		{
 			name: "nullable field with no constraints",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "bio", DataType: "text", Nullable: true},
 			},
 			constraints: []constraintInfo{},
-			want: []FieldDefinition{
+			want: []contract.FieldDefinition{
 				{
 					Name:        "bio",
 					DataType:    "text",
@@ -196,7 +198,7 @@ func TestApplyConstraints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fields := make([]FieldDefinition, len(tt.fields))
+			fields := make([]contract.FieldDefinition, len(tt.fields))
 			copy(fields, tt.fields)
 
 			applyConstraints(fields, tt.constraints)
@@ -211,13 +213,13 @@ func TestApplyConstraints(t *testing.T) {
 func TestBuildValidationRules(t *testing.T) {
 	tests := []struct {
 		name        string
-		fields      []FieldDefinition
+		fields      []contract.FieldDefinition
 		constraints []constraintInfo
-		want        ValidationRules
+		want        contract.ValidationRules
 	}{
 		{
 			name: "required and unique fields",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "id", Nullable: false},
 				{Name: "email", Nullable: false},
 				{Name: "bio", Nullable: true},
@@ -226,30 +228,30 @@ func TestBuildValidationRules(t *testing.T) {
 				{ColumnName: "id", ConstraintType: "PRIMARY KEY"},
 				{ColumnName: "email", ConstraintType: "UNIQUE"},
 			},
-			want: ValidationRules{
+			want: contract.ValidationRules{
 				RequiredFields:    []string{"id", "email"},
 				UniqueConstraints: []string{"id", "email"},
 			},
 		},
 		{
 			name: "no constraints",
-			fields: []FieldDefinition{
+			fields: []contract.FieldDefinition{
 				{Name: "col1", Nullable: true},
 				{Name: "col2", Nullable: true},
 			},
 			constraints: []constraintInfo{},
-			want: ValidationRules{
+			want: contract.ValidationRules{
 				RequiredFields:    nil,
 				UniqueConstraints: nil,
 			},
 		},
 		{
 			name:   "empty fields",
-			fields: []FieldDefinition{},
+			fields: []contract.FieldDefinition{},
 			constraints: []constraintInfo{
 				{ColumnName: "id", ConstraintType: "PRIMARY KEY"},
 			},
-			want: ValidationRules{
+			want: contract.ValidationRules{
 				RequiredFields:    nil,
 				UniqueConstraints: []string{"id"},
 			},
@@ -277,7 +279,7 @@ func TestTopNValues(t *testing.T) {
 		name  string
 		freqs map[string]int
 		n     int
-		want  []TopValue
+		want  []contract.TopValue
 	}{
 		{
 			name:  "empty",
@@ -295,19 +297,19 @@ func TestTopNValues(t *testing.T) {
 			name:  "top 2 of 3",
 			freqs: map[string]int{"a": 10, "b": 5, "c": 1},
 			n:     2,
-			want:  []TopValue{{Value: "a", Count: 10}, {Value: "b", Count: 5}},
+			want:  []contract.TopValue{{Value: "a", Count: 10}, {Value: "b", Count: 5}},
 		},
 		{
 			name:  "n larger than map",
 			freqs: map[string]int{"x": 3},
 			n:     5,
-			want:  []TopValue{{Value: "x", Count: 3}},
+			want:  []contract.TopValue{{Value: "x", Count: 3}},
 		},
 		{
 			name:  "tie broken by key ascending",
 			freqs: map[string]int{"b": 5, "a": 5},
 			n:     2,
-			want:  []TopValue{{Value: "a", Count: 5}, {Value: "b", Count: 5}},
+			want:  []contract.TopValue{{Value: "a", Count: 5}, {Value: "b", Count: 5}},
 		},
 	}
 

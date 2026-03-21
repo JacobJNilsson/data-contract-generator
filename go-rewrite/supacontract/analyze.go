@@ -12,7 +12,7 @@ import (
 
 // AnalyzeDatabase fetches the PostgREST OpenAPI spec from a Supabase project
 // and returns a DatabaseContract describing every exposed table.
-func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DatabaseContract, error) {
+func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DataContract, error) {
 	if err := validateProjectURL(projectURL); err != nil {
 		return nil, err
 	}
@@ -25,22 +25,22 @@ func AnalyzeDatabase(ctx context.Context, projectURL, apiKey string) (*DatabaseC
 
 // analyzeFromURL does the actual work. Separated from AnalyzeDatabase so
 // tests can bypass URL validation and point at httptest servers.
-func analyzeFromURL(ctx context.Context, baseURL, apiKey, databaseID string) (*DatabaseContract, error) {
+func analyzeFromURL(ctx context.Context, baseURL, apiKey, projectID string) (*DataContract, error) {
 	spec, err := fetchOpenAPISpec(ctx, baseURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
 
-	tables := parseTables(spec)
+	schemas := parseTables(spec)
 
-	return &DatabaseContract{
+	return &DataContract{
 		ContractType: "destination",
-		DatabaseID:   databaseID,
-		Tables:       tables,
+		ID:           projectID,
+		Schemas:      schemas,
 		Metadata: map[string]any{
 			"source":      "supabase",
 			"project_url": baseURL,
-			"table_count": len(tables),
+			"table_count": len(schemas),
 		},
 	}, nil
 }
@@ -132,11 +132,11 @@ func fetchOpenAPISpec(ctx context.Context, projectURL, apiKey string) (*openAPIS
 	return &spec, nil
 }
 
-// parseTables extracts TableContracts from the OpenAPI spec.
-func parseTables(spec *openAPISpec) []TableContract {
+// parseTables extracts SchemaContracts from the OpenAPI spec.
+func parseTables(spec *openAPISpec) []SchemaContract {
 	tableNames := extractTableNames(spec.Paths)
 
-	tables := make([]TableContract, 0, len(tableNames))
+	tables := make([]SchemaContract, 0, len(tableNames))
 	for _, name := range tableNames {
 		def, ok := spec.Definitions[name]
 		if !ok {
@@ -169,8 +169,8 @@ func extractTableNames(paths map[string]any) []string {
 	return names
 }
 
-// buildTable converts an OpenAPI schema definition into a TableContract.
-func buildTable(name string, def schemaObject) TableContract {
+// buildTable converts an OpenAPI schema definition into a SchemaContract.
+func buildTable(name string, def schemaObject) SchemaContract {
 	requiredSet := make(map[string]bool, len(def.Required))
 	for _, r := range def.Required {
 		requiredSet[r] = true
@@ -192,9 +192,9 @@ func buildTable(name string, def schemaObject) TableContract {
 
 	rules := buildRules(fields)
 
-	return TableContract{
-		TableName:       name,
-		Schema:          "public",
+	return SchemaContract{
+		Name:            name,
+		Namespace:       "public",
 		Fields:          fields,
 		ValidationRules: rules,
 	}

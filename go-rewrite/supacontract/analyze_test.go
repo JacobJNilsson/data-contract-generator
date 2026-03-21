@@ -164,8 +164,8 @@ func TestParseTables_MissingDefinition(t *testing.T) {
 	if len(tables) != 1 {
 		t.Fatalf("got %d tables, want 1", len(tables))
 	}
-	if tables[0].TableName != "exists" {
-		t.Errorf("table = %q, want exists", tables[0].TableName)
+	if tables[0].Name != "exists" {
+		t.Errorf("table = %q, want exists", tables[0].Name)
 	}
 }
 
@@ -267,11 +267,11 @@ func TestParseTables(t *testing.T) {
 	}
 
 	// Tables should be sorted
-	if tables[0].TableName != "orders" {
-		t.Errorf("tables[0].TableName = %q, want orders", tables[0].TableName)
+	if tables[0].Name != "orders" {
+		t.Errorf("tables[0].Name = %q, want orders", tables[0].Name)
 	}
-	if tables[1].TableName != "users" {
-		t.Errorf("tables[1].TableName = %q, want users", tables[1].TableName)
+	if tables[1].Name != "users" {
+		t.Errorf("tables[1].Name = %q, want users", tables[1].Name)
 	}
 
 	// Verify users table
@@ -317,22 +317,22 @@ func TestAnalyzeFromURL_Success(t *testing.T) {
 	ts := newTestServer(sampleOpenAPISpec())
 	defer ts.Close()
 
-	contract, err := analyzeFromURL(context.Background(), ts.URL, "test-key", "test-project")
+	dc, err := analyzeFromURL(context.Background(), ts.URL, "test-key", "test-project")
 	if err != nil {
 		t.Fatalf("analyzeFromURL() error = %v", err)
 	}
 
-	if contract.ContractType != "destination" {
-		t.Errorf("ContractType = %q, want destination", contract.ContractType)
+	if dc.ContractType != "destination" {
+		t.Errorf("ContractType = %q, want destination", dc.ContractType)
 	}
-	if contract.DatabaseID != "test-project" {
-		t.Errorf("DatabaseID = %q, want test-project", contract.DatabaseID)
+	if dc.ID != "test-project" {
+		t.Errorf("ID = %q, want test-project", dc.ID)
 	}
-	if len(contract.Tables) != 2 {
-		t.Fatalf("got %d tables, want 2", len(contract.Tables))
+	if len(dc.Schemas) != 2 {
+		t.Fatalf("got %d schemas, want 2", len(dc.Schemas))
 	}
-	if contract.Metadata["table_count"] != 2 {
-		t.Errorf("table_count = %v, want 2", contract.Metadata["table_count"])
+	if dc.Metadata["table_count"] != 2 {
+		t.Errorf("table_count = %v, want 2", dc.Metadata["table_count"])
 	}
 }
 
