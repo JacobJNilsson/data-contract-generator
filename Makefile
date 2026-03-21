@@ -1,47 +1,61 @@
-.PHONY: lint format format-check mypy test check build clean release install-local
+PG_CONTAINER := contract-gen-pg-test
+PG_PORT      := 5439
+PG_CONN      := postgres://postgres:postgres@localhost:$(PG_PORT)/postgres
 
-# Run ruff linter
-lint:
-	uv run --with ruff ruff check .
+.PHONY: build test lint vet tidy check clean setup db-start db-stop
 
-# Run ruff formatter (fix and format)
-format:
-	uv run --with ruff ruff check --fix .
-	uv run --with ruff ruff format .
-
-# Check formatting without making changes
-format-check:
-	uv run --with ruff ruff format --check .
-
-# Run mypy type checker
-mypy:
-	uv run --with mypy --with types-PyYAML --with pytest-stub mypy .
-
-# Run tests
-test:
-	uv run --with pytest pytest
-
-# Run all checks
-check: lint format-check mypy
-
-# Packaging and distribution
 build:
-	@echo "Building package..."
-	uv build
+	go build ./...
 
-clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf dist/ build/ *.egg-info
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+test: db-start
+	go test -race -coverprofile=coverage.out ./csvcontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL csvcontract %.1f%% < 100%%\n", $$1; exit 1} else {printf "csvcontract: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./jsoncontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 95) {printf "FAIL jsoncontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "jsoncontract: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./apicontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 95) {printf "FAIL apicontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "apicontract: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./verify/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL verify %.1f%% < 100%%\n", $$1; exit 1} else {printf "verify: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./transform/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL transform %.1f%% < 100%%\n", $$1; exit 1} else {printf "transform: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./supacontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 95) {printf "FAIL supacontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "supacontract: %.1f%%\n", $$1}}'
+	TEST_PG_CONN=$(PG_CONN) go test -race -coverprofile=coverage.out ./pgcontract/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 85) {printf "FAIL pgcontract %.1f%% < 85%%\n", $$1; exit 1} else {printf "pgcontract: %.1f%%\n", $$1}}'
 
-release: check test clean build
-	@echo "All checks passed! Creating GitHub release..."
-	@VERSION=$$(grep -m 1 'version = ' pyproject.toml | cut -d '"' -f 2); \
-	echo "Version: $$VERSION"; \
-	gh release create "v$$VERSION" dist/*.whl dist/*.tar.gz \
-		--title "Release v$$VERSION" \
-		--generate-notes
+lint:
+	golangci-lint run ./...
 
-install-local: clean build
-	@echo "Installing locally with uv tool..."
-	uv tool install --force dist/*.whl
+vet:
+	go vet ./...
+
+tidy:
+	go mod tidy
+
+check: tidy vet lint test build
+
+# Start Postgres if not already running. Reuse across test runs.
+db-start:
+	@docker inspect $(PG_CONTAINER) >/dev/null 2>&1 && \
+		docker start $(PG_CONTAINER) >/dev/null 2>&1 || \
+		docker run --name $(PG_CONTAINER) \
+			-e POSTGRES_PASSWORD=postgres \
+			-p $(PG_PORT):5432 \
+			-d postgres:17-alpine >/dev/null 2>&1
+	@until docker exec $(PG_CONTAINER) pg_isready -U postgres >/dev/null 2>&1; do sleep 0.2; done
+
+db-stop:
+	@docker stop $(PG_CONTAINER) >/dev/null 2>&1 || true
+
+setup:
+	git config core.hooksPath .githooks
+
+clean: db-stop
+	rm -rf coverage.out

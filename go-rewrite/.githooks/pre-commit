@@ -1,3 +1,0 @@
-#!/bin/sh
-set -e
-make -C go-rewrite check
