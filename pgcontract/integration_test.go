@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/JacobJNilsson/data-contract-generator/contract"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestAnalyzeDatabase_Integration(t *testing.T) {

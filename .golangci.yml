@@ -5,7 +5,7 @@ run:
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - govet
@@ -18,36 +18,30 @@ linters:
     - noctx
     - revive
     - unparam
+  settings:
+    govet:
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: exported
+        - name: increment-decrement
+        - name: var-naming
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: duplicated-imports
+        - name: modifies-value-receiver
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-linters-settings:
-  govet:
-    disable:
-      - fieldalignment
-
-  revive:
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: exported
-        arguments: [disableStutterCheck]
-      - name: increment-decrement
-      - name: var-naming
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: duplicated-imports
-      - name: modifies-value-receiver
-
-issues:
-  exclude-use-default: false

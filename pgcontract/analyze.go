@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/JacobJNilsson/data-contract-generator/contract"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
 // AnalyzeDatabase connects to a PostgreSQL database and generates a contract
