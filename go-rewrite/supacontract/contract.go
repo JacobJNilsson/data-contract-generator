@@ -1,31 +1,31 @@
 // Package supacontract analyzes Supabase projects via the PostgREST
-// OpenAPI endpoint and produces database contracts describing table
+// OpenAPI endpoint and produces data contracts describing table
 // structures and types. Only requires a project URL and API key.
 package supacontract
 
-import "github.com/jacobjnilsson/contract-gen/pgcontract"
+import "github.com/jacobjnilsson/contract-gen/contract"
 
-// Re-export pgcontract types. The output format is identical since
-// both analyze Postgres tables (Supabase is Postgres under the hood).
+// Re-export contract types for convenience. Callers can use either
+// contract.DataContract or supacontract.DataContract.
 type (
-	// DatabaseContract is the complete analysis of a database.
-	DatabaseContract = pgcontract.DatabaseContract
-	// TableContract describes a single table.
-	TableContract = pgcontract.TableContract
-	// FieldDefinition describes a single column.
-	FieldDefinition = pgcontract.FieldDefinition
-	// FieldConstraint represents a constraint on a column.
-	FieldConstraint = pgcontract.FieldConstraint
-	// ValidationRules summarises table-level validation requirements.
-	ValidationRules = pgcontract.ValidationRules
+	// DataContract is the complete analysis of a data endpoint.
+	DataContract = contract.DataContract
+	// SchemaContract describes a single schema.
+	SchemaContract = contract.SchemaContract
+	// FieldDefinition describes a single field.
+	FieldDefinition = contract.FieldDefinition
+	// FieldConstraint represents a constraint on a field.
+	FieldConstraint = contract.FieldConstraint
+	// ValidationRules summarises schema-level validation requirements.
+	ValidationRules = contract.ValidationRules
 	// ConstraintType enumerates constraint types.
-	ConstraintType = pgcontract.ConstraintType
+	ConstraintType = contract.ConstraintType
 )
 
 // Re-exported constraint constants.
 const (
-	ConstraintNotNull    = pgcontract.ConstraintNotNull
-	ConstraintUnique     = pgcontract.ConstraintUnique
-	ConstraintPrimaryKey = pgcontract.ConstraintPrimaryKey
-	ConstraintForeignKey = pgcontract.ConstraintForeignKey
+	ConstraintNotNull    = contract.ConstraintNotNull
+	ConstraintUnique     = contract.ConstraintUnique
+	ConstraintPrimaryKey = contract.ConstraintPrimaryKey
+	ConstraintForeignKey = contract.ConstraintForeignKey
 )

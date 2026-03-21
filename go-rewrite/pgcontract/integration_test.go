@@ -7,15 +7,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jacobjnilsson/contract-gen/contract"
 )
 
-// TestAnalyzeDatabase_Integration requires a running PostgreSQL instance.
-// Set TEST_PG_CONN to the connection string.
-//
-// Example:
-//
-//	export TEST_PG_CONN="postgres://postgres:postgres@localhost:5432/testdb"
-//	go test -tags=integration ./pgcontract/... -v
 func TestAnalyzeDatabase_Integration(t *testing.T) {
 	connString := os.Getenv("TEST_PG_CONN")
 	if connString == "" {
@@ -30,7 +24,6 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Create test tables with relationships and seed data
 	setup := `
 		DROP TABLE IF EXISTS test_orders CASCADE;
 		DROP TABLE IF EXISTS test_users CASCADE;
@@ -68,8 +61,7 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		t.Fatalf("Failed to setup test tables: %v", err)
 	}
 
-	// Analyze entire database
-	contract, err := AnalyzeDatabase(ctx, connString, &Options{
+	dc, err := AnalyzeDatabase(ctx, connString, &Options{
 		Schema:          "public",
 		IncludeComments: true,
 	})
@@ -77,48 +69,44 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		t.Fatalf("AnalyzeDatabase() error = %v", err)
 	}
 
-	if contract.ContractType != "destination" {
-		t.Errorf("ContractType = %v, want destination", contract.ContractType)
+	if dc.ContractType != "destination" {
+		t.Errorf("ContractType = %v, want destination", dc.ContractType)
 	}
 
-	if len(contract.Tables) < 2 {
-		t.Fatalf("Expected at least 2 tables, got %d", len(contract.Tables))
+	if len(dc.Schemas) < 2 {
+		t.Fatalf("Expected at least 2 schemas, got %d", len(dc.Schemas))
 	}
 
-	// Find the test tables
-	var usersTable, ordersTable *TableContract
-	for i := range contract.Tables {
-		switch contract.Tables[i].TableName {
+	var usersSchema, ordersSchema *contract.SchemaContract
+	for i := range dc.Schemas {
+		switch dc.Schemas[i].Name {
 		case "test_users":
-			usersTable = &contract.Tables[i]
+			usersSchema = &dc.Schemas[i]
 		case "test_orders":
-			ordersTable = &contract.Tables[i]
+			ordersSchema = &dc.Schemas[i]
 		}
 	}
 
-	if usersTable == nil {
-		t.Fatal("test_users table not found in contract")
+	if usersSchema == nil {
+		t.Fatal("test_users schema not found")
 	}
-	if ordersTable == nil {
-		t.Fatal("test_orders table not found in contract")
-	}
-
-	// Verify users table
-	if len(usersTable.Fields) != 5 {
-		t.Errorf("test_users: got %d fields, want 5", len(usersTable.Fields))
+	if ordersSchema == nil {
+		t.Fatal("test_orders schema not found")
 	}
 
-	// Verify id has primary key
-	idField := findField(usersTable.Fields, "id")
+	if len(usersSchema.Fields) != 5 {
+		t.Errorf("test_users: got %d fields, want 5", len(usersSchema.Fields))
+	}
+
+	idField := findField(usersSchema.Fields, "id")
 	if idField == nil {
 		t.Fatal("id field not found")
 	}
-	if !hasConstraint(idField.Constraints, ConstraintPrimaryKey) {
+	if !hasConstraint(idField.Constraints, contract.ConstraintPrimaryKey) {
 		t.Error("id should have primary key constraint")
 	}
 
-	// Verify email has comment
-	emailField := findField(usersTable.Fields, "email")
+	emailField := findField(usersSchema.Fields, "email")
 	if emailField == nil {
 		t.Fatal("email field not found")
 	}
@@ -126,43 +114,38 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		t.Errorf("email description = %v, want 'User email address'", emailField.Description)
 	}
 
-	// Verify orders table has foreign key
-	userIDField := findField(ordersTable.Fields, "user_id")
+	userIDField := findField(ordersSchema.Fields, "user_id")
 	if userIDField == nil {
 		t.Fatal("user_id field not found in orders")
 	}
-	if !hasConstraint(userIDField.Constraints, ConstraintForeignKey) {
+	if !hasConstraint(userIDField.Constraints, contract.ConstraintForeignKey) {
 		t.Error("user_id should have foreign key constraint")
 	}
 
-	// Verify metadata
-	if contract.Metadata["table_count"] != len(contract.Tables) {
-		t.Errorf("table_count metadata = %v, want %d", contract.Metadata["table_count"], len(contract.Tables))
+	if dc.Metadata["table_count"] != len(dc.Schemas) {
+		t.Errorf("table_count metadata = %v, want %d", dc.Metadata["table_count"], len(dc.Schemas))
 	}
 
-	// Verify row counts
-	if usersTable.RowCount == nil {
+	if usersSchema.RowCount == nil {
 		t.Error("users row_count should not be nil")
-	} else if *usersTable.RowCount != 3 {
-		t.Errorf("users row_count = %d, want 3", *usersTable.RowCount)
+	} else if *usersSchema.RowCount != 3 {
+		t.Errorf("users row_count = %d, want 3", *usersSchema.RowCount)
 	}
 
-	if ordersTable.RowCount == nil {
+	if ordersSchema.RowCount == nil {
 		t.Error("orders row_count should not be nil")
-	} else if *ordersTable.RowCount != 4 {
-		t.Errorf("orders row_count = %d, want 4", *ordersTable.RowCount)
+	} else if *ordersSchema.RowCount != 4 {
+		t.Errorf("orders row_count = %d, want 4", *ordersSchema.RowCount)
 	}
 
-	// Verify sample data
-	if len(usersTable.SampleData) == 0 {
+	if len(usersSchema.SampleData) == 0 {
 		t.Error("users should have sample data")
 	}
-	if len(usersTable.SampleData) > 5 {
-		t.Errorf("users sample data = %d rows, want <= 5", len(usersTable.SampleData))
+	if len(usersSchema.SampleData) > 5 {
+		t.Errorf("users sample data = %d rows, want <= 5", len(usersSchema.SampleData))
 	}
 
-	// Verify profiling on users.bio (has 1 null out of 3)
-	bioField := findField(usersTable.Fields, "bio")
+	bioField := findField(usersSchema.Fields, "bio")
 	if bioField == nil {
 		t.Fatal("bio field not found")
 	}
@@ -179,8 +162,7 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		t.Errorf("bio distinct_count = %d, want 2", bioField.Profile.DistinctCount)
 	}
 
-	// Verify profiling on orders.status (has top values)
-	statusField := findField(ordersTable.Fields, "status")
+	statusField := findField(ordersSchema.Fields, "status")
 	if statusField == nil {
 		t.Fatal("status field not found")
 	}
@@ -190,7 +172,6 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 	if len(statusField.Profile.TopValues) == 0 {
 		t.Error("status should have top values")
 	}
-	// "shipped" appears twice, should be first
 	if statusField.Profile.TopValues[0].Value != "shipped" {
 		t.Errorf("status top value = %q, want 'shipped'", statusField.Profile.TopValues[0].Value)
 	}
@@ -198,13 +179,11 @@ func TestAnalyzeDatabase_Integration(t *testing.T) {
 		t.Errorf("status top count = %d, want 2", statusField.Profile.TopValues[0].Count)
 	}
 
-	// Print for manual inspection
 	if testing.Verbose() {
-		b, _ := json.MarshalIndent(contract, "", "  ")
-		t.Logf("Generated database contract:\n%s", b)
+		b, _ := json.MarshalIndent(dc, "", "  ")
+		t.Logf("Generated data contract:\n%s", b)
 	}
 
-	// Cleanup
 	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS test_orders CASCADE; DROP TABLE IF EXISTS test_users CASCADE")
 }
 
@@ -233,16 +212,16 @@ func TestAnalyzeTable_Integration(t *testing.T) {
 		t.Fatalf("Failed to setup: %v", err)
 	}
 
-	table, err := AnalyzeTable(ctx, connString, "test_single", nil)
+	sc, err := AnalyzeTable(ctx, connString, "test_single", nil)
 	if err != nil {
 		t.Fatalf("AnalyzeTable() error = %v", err)
 	}
 
-	if table.TableName != "test_single" {
-		t.Errorf("TableName = %v, want test_single", table.TableName)
+	if sc.Name != "test_single" {
+		t.Errorf("Name = %v, want test_single", sc.Name)
 	}
-	if len(table.Fields) != 2 {
-		t.Errorf("Fields count = %d, want 2", len(table.Fields))
+	if len(sc.Fields) != 2 {
+		t.Errorf("Fields count = %d, want 2", len(sc.Fields))
 	}
 
 	_, _ = pool.Exec(ctx, "DROP TABLE IF EXISTS test_single CASCADE")
@@ -271,7 +250,7 @@ func TestAnalyzeDatabase_Integration_InvalidConnection(t *testing.T) {
 
 // helpers
 
-func findField(fields []FieldDefinition, name string) *FieldDefinition {
+func findField(fields []contract.FieldDefinition, name string) *contract.FieldDefinition {
 	for i := range fields {
 		if fields[i].Name == name {
 			return &fields[i]
@@ -280,7 +259,7 @@ func findField(fields []FieldDefinition, name string) *FieldDefinition {
 	return nil
 }
 
-func hasConstraint(constraints []FieldConstraint, ct ConstraintType) bool {
+func hasConstraint(constraints []contract.FieldConstraint, ct contract.ConstraintType) bool {
 	for _, c := range constraints {
 		if c.Type == ct {
 			return true

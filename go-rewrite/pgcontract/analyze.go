@@ -8,12 +8,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jacobjnilsson/contract-gen/contract"
 )
 
 // AnalyzeDatabase connects to a PostgreSQL database and generates a contract
 // describing every table in the specified schema. The AI agent uses this to
 // decide which table to ingest data into or extract data from.
-func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*DatabaseContract, error) {
+func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*contract.DataContract, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -31,7 +32,7 @@ func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*Da
 		return nil, fmt.Errorf("failed to list tables: %w", err)
 	}
 
-	tables := make([]TableContract, 0, len(tableNames))
+	tables := make([]contract.SchemaContract, 0, len(tableNames))
 	for _, name := range tableNames {
 		table, err := analyzeTable(ctx, pool, schema, name, opts)
 		if err != nil {
@@ -45,10 +46,10 @@ func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*Da
 		return nil, fmt.Errorf("failed to get database name: %w", err)
 	}
 
-	return &DatabaseContract{
+	return &contract.DataContract{
 		ContractType: "destination",
-		DatabaseID:   dbName,
-		Tables:       tables,
+		ID:           dbName,
+		Schemas:      tables,
 		Metadata: map[string]any{
 			"source":      "postgresql",
 			"schema":      schema,
@@ -60,7 +61,7 @@ func AnalyzeDatabase(ctx context.Context, connString string, opts *Options) (*Da
 
 // AnalyzeTable connects to a PostgreSQL database and generates a contract
 // for a single table.
-func AnalyzeTable(ctx context.Context, connString, tableName string, opts *Options) (*TableContract, error) {
+func AnalyzeTable(ctx context.Context, connString, tableName string, opts *Options) (*contract.SchemaContract, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -128,7 +129,7 @@ func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, tableName stri
 
 // analyzeTable introspects a single table and returns its contract,
 // including data profiling from a bounded sample.
-func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, opts *Options) (*TableContract, error) {
+func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, opts *Options) (*contract.SchemaContract, error) {
 	fields, err := getColumns(ctx, pool, schema, tableName, opts.includeComments())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
@@ -157,9 +158,9 @@ func analyzeTable(ctx context.Context, pool *pgxpool.Pool, schema, tableName str
 		sampleData = nil
 	}
 
-	return &TableContract{
-		TableName:       tableName,
-		Schema:          schema,
+	return &contract.SchemaContract{
+		Name:            tableName,
+		Namespace:       schema,
 		RowCount:        &rowCount,
 		Fields:          fields,
 		SampleData:      sampleData,
@@ -201,7 +202,7 @@ func getRowCount(ctx context.Context, pool *pgxpool.Pool, schema, tableName stri
 // per-column statistics. The total number of rows read is bounded by
 // opts.sampleSize (default 10 000) and each batch fetches opts.batchSize
 // rows (default 1000) to keep memory usage predictable.
-func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition, opts *Options) ([][]string, error) {
+func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []contract.FieldDefinition, opts *Options) ([][]string, error) {
 	if len(fields) == 0 {
 		return nil, nil
 	}
@@ -319,7 +320,7 @@ func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName st
 		}
 
 		s := stats[i]
-		profile := &FieldProfile{
+		profile := &contract.FieldProfile{
 			NullCount:      s.nulls,
 			NullPercentage: float64(s.nulls) / float64(totalRows) * 100,
 			DistinctCount:  len(s.distinct),
@@ -337,17 +338,17 @@ func profileFields(ctx context.Context, pool *pgxpool.Pool, schema, tableName st
 
 // topNValues returns the N most frequent values from a frequency map,
 // sorted by count descending then key ascending for deterministic output.
-func topNValues(freqs map[string]int, n int) []TopValue {
+func topNValues(freqs map[string]int, n int) []contract.TopValue {
 	if len(freqs) == 0 {
 		return nil
 	}
 
-	entries := make([]TopValue, 0, len(freqs))
+	entries := make([]contract.TopValue, 0, len(freqs))
 	for k, v := range freqs {
-		entries = append(entries, TopValue{Value: k, Count: v})
+		entries = append(entries, contract.TopValue{Value: k, Count: v})
 	}
 
-	slices.SortFunc(entries, func(a, b TopValue) int {
+	slices.SortFunc(entries, func(a, b contract.TopValue) int {
 		if a.Count != b.Count {
 			return b.Count - a.Count // descending
 		}
@@ -361,7 +362,7 @@ func topNValues(freqs map[string]int, n int) []TopValue {
 }
 
 // getColumns retrieves column information from information_schema.
-func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, includeComments bool) ([]FieldDefinition, error) {
+func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, includeComments bool) ([]contract.FieldDefinition, error) {
 	query := `
 		SELECT 
 			c.column_name,
@@ -385,14 +386,14 @@ func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName strin
 	}
 	defer rows.Close()
 
-	var fields []FieldDefinition
+	var fields []contract.FieldDefinition
 	for rows.Next() {
 		var name, dataType, fullType string
 		var isNullable bool
 		if err := rows.Scan(&name, &dataType, &isNullable, &fullType); err != nil {
 			return nil, err
 		}
-		fields = append(fields, FieldDefinition{
+		fields = append(fields, contract.FieldDefinition{
 			Name:     name,
 			DataType: normalizeDataType(fullType),
 			Nullable: isNullable,
@@ -412,7 +413,7 @@ func getColumns(ctx context.Context, pool *pgxpool.Pool, schema, tableName strin
 }
 
 // addColumnComments reads pg_description and sets field Description pointers.
-func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []FieldDefinition) error {
+func addColumnComments(ctx context.Context, pool *pgxpool.Pool, schema, tableName string, fields []contract.FieldDefinition) error {
 	query := `
 		SELECT a.attname, d.description
 		FROM pg_catalog.pg_description d
@@ -495,7 +496,7 @@ func getConstraints(ctx context.Context, pool *pgxpool.Pool, schema, tableName s
 }
 
 // applyConstraints annotates field definitions with their constraints.
-func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) {
+func applyConstraints(fields []contract.FieldDefinition, constraints []constraintInfo) {
 	byColumn := make(map[string][]constraintInfo)
 	for _, c := range constraints {
 		byColumn[c.ColumnName] = append(byColumn[c.ColumnName], c)
@@ -503,31 +504,31 @@ func applyConstraints(fields []FieldDefinition, constraints []constraintInfo) {
 
 	for i := range fields {
 		for _, c := range byColumn[fields[i].Name] {
-			fc := FieldConstraint{}
+			fc := contract.FieldConstraint{}
 			switch c.ConstraintType {
 			case "PRIMARY KEY":
-				fc.Type = ConstraintPrimaryKey
+				fc.Type = contract.ConstraintPrimaryKey
 			case "FOREIGN KEY":
-				fc.Type = ConstraintForeignKey
+				fc.Type = contract.ConstraintForeignKey
 				fc.ReferredTable = c.RefTable
 				fc.ReferredColumn = c.RefColumn
 			case "UNIQUE":
-				fc.Type = ConstraintUnique
+				fc.Type = contract.ConstraintUnique
 			}
 			fields[i].Constraints = append(fields[i].Constraints, fc)
 		}
 
 		if !fields[i].Nullable {
-			fields[i].Constraints = append(fields[i].Constraints, FieldConstraint{
-				Type: ConstraintNotNull,
+			fields[i].Constraints = append(fields[i].Constraints, contract.FieldConstraint{
+				Type: contract.ConstraintNotNull,
 			})
 		}
 	}
 }
 
-// buildValidationRules derives validation rules from fields and constraints.
-func buildValidationRules(fields []FieldDefinition, constraints []constraintInfo) ValidationRules {
-	var rules ValidationRules
+// buildcontract.ValidationRules derives validation rules from fields and constraints.
+func buildValidationRules(fields []contract.FieldDefinition, constraints []constraintInfo) contract.ValidationRules {
+	var rules contract.ValidationRules
 
 	for _, f := range fields {
 		if !f.Nullable {

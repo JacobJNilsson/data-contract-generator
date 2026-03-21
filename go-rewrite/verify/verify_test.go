@@ -261,57 +261,57 @@ func TestVerifyDestinationValid(t *testing.T) {
 	}
 }
 
-func TestVerifyDestinationMissingDatabaseID(t *testing.T) {
+func TestVerifyDestinationMissingID(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "",
-		"tables": [{"table_name": "t", "fields": [{"name": "id", "data_type": "integer", "nullable": false}], "validation_rules": {}}]
+		"id": "",
+		"schemas": [{"name": "t", "fields": [{"name": "id", "data_type": "integer", "nullable": false}], "validation_rules": {}}]
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "missing database_id")
+	assertInvalid(t, r, "missing id")
 }
 
-func TestVerifyDestinationNoTables(t *testing.T) {
+func TestVerifyDestinationNoSchemas(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": []
+		"id": "db",
+		"schemas": []
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "no tables defined")
+	assertInvalid(t, r, "no schemas defined")
 }
 
-func TestVerifyDestinationDuplicateTable(t *testing.T) {
+func TestVerifyDestinationDuplicateSchema(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [
-			{"table_name": "t", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}},
-			{"table_name": "t", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}}
+		"id": "db",
+		"schemas": [
+			{"name": "t", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}},
+			{"name": "t", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}}
 		]
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "duplicate table_name")
+	assertInvalid(t, r, "duplicate name")
 }
 
-func TestVerifyDestinationMissingTableName(t *testing.T) {
+func TestVerifyDestinationMissingSchemaName(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [
-			{"table_name": "", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}}
+		"id": "db",
+		"schemas": [
+			{"name": "", "fields": [{"name": "id", "data_type": "integer"}], "validation_rules": {}}
 		]
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "missing table_name")
+	assertInvalid(t, r, "missing name")
 }
 
 func TestVerifyDestinationUnknownDataType(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [
-			{"table_name": "t", "fields": [{"name": "id", "data_type": "foobar"}], "validation_rules": {}}
+		"id": "db",
+		"schemas": [
+			{"name": "t", "fields": [{"name": "id", "data_type": "foobar"}], "validation_rules": {}}
 		]
 	}`
 	r := Verify([]byte(data))
@@ -321,9 +321,9 @@ func TestVerifyDestinationUnknownDataType(t *testing.T) {
 func TestVerifyDestinationDuplicateField(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [
-			{"table_name": "t", "fields": [
+		"id": "db",
+		"schemas": [
+			{"name": "t", "fields": [
 				{"name": "id", "data_type": "integer"},
 				{"name": "id", "data_type": "text"}
 			], "validation_rules": {}}
@@ -336,9 +336,9 @@ func TestVerifyDestinationDuplicateField(t *testing.T) {
 func TestVerifyDestinationUnknownConstraintType(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": "integer", "constraints": [{"type": "magic"}]}],
 			"validation_rules": {}
 		}]
@@ -350,9 +350,9 @@ func TestVerifyDestinationUnknownConstraintType(t *testing.T) {
 func TestVerifyDestinationEmptyConstraintType(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": "integer", "constraints": [{"type": ""}]}],
 			"validation_rules": {}
 		}]
@@ -364,9 +364,9 @@ func TestVerifyDestinationEmptyConstraintType(t *testing.T) {
 func TestVerifyDestinationFKMissingReferences(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "user_id", "data_type": "integer", "constraints": [{"type": "foreign_key"}]}],
 			"validation_rules": {}
 		}]
@@ -379,9 +379,9 @@ func TestVerifyDestinationFKMissingReferences(t *testing.T) {
 func TestVerifyDestinationFKEmptyReferences(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "user_id", "data_type": "integer", "constraints": [{"type": "foreign_key", "referred_table": "", "referred_column": ""}]}],
 			"validation_rules": {}
 		}]
@@ -396,9 +396,9 @@ func TestVerifyDestinationFKEmptyReferences(t *testing.T) {
 func TestVerifyDestinationRequiredFieldUnknown(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": "integer", "nullable": false, "constraints": [{"type": "not_null"}]}],
 			"validation_rules": {"required_fields": ["id", "ghost"]}
 		}]
@@ -411,9 +411,9 @@ func TestVerifyDestinationRequiredFieldUnknown(t *testing.T) {
 func TestVerifyDestinationUniqueConstraintUnknown(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": "integer"}],
 			"validation_rules": {"unique_constraints": ["id", "typo"]}
 		}]
@@ -428,9 +428,9 @@ func TestVerifyDestinationUniqueConstraintUnknown(t *testing.T) {
 func TestVerifyDestinationNotNullableMissingConstraint(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": "integer", "nullable": false, "constraints": [{"type": "primary_key"}]}],
 			"validation_rules": {}
 		}]
@@ -468,7 +468,7 @@ func TestVerifySourceBadJSON(t *testing.T) {
 // --- Destination additional tests -------------------------------------------
 
 func TestVerifyDestinationBadJSON(t *testing.T) {
-	data := `{"contract_type": "destination", "tables": "not an array"}`
+	data := `{"contract_type": "destination", "schemas": "not an array"}`
 	r := Verify([]byte(data))
 	assertInvalid(t, r, "failed to parse destination contract")
 }
@@ -476,9 +476,9 @@ func TestVerifyDestinationBadJSON(t *testing.T) {
 func TestVerifyDestinationNegativeRowCount(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"row_count": -5,
 			"fields": [{"name": "id", "data_type": "integer", "nullable": false, "constraints": [{"type": "not_null"}]}],
 			"validation_rules": {}
@@ -491,9 +491,9 @@ func TestVerifyDestinationNegativeRowCount(t *testing.T) {
 func TestVerifyDestinationMissingFieldName(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "", "data_type": "integer"}],
 			"validation_rules": {}
 		}]
@@ -505,9 +505,9 @@ func TestVerifyDestinationMissingFieldName(t *testing.T) {
 func TestVerifyDestinationMissingFieldDataType(t *testing.T) {
 	data := `{
 		"contract_type": "destination",
-		"database_id": "db",
-		"tables": [{
-			"table_name": "t",
+		"id": "db",
+		"schemas": [{
+			"name": "t",
 			"fields": [{"name": "id", "data_type": ""}],
 			"validation_rules": {}
 		}]
@@ -595,9 +595,9 @@ func validCSVSourceContract() string {
 func validDestinationContract() string {
 	return `{
 		"contract_type": "destination",
-		"database_id": "mydb",
-		"tables": [{
-			"table_name": "users",
+		"id": "mydb",
+		"schemas": [{
+			"name": "users",
 			"schema": "public",
 			"row_count": 100,
 			"fields": [
