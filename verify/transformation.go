@@ -15,8 +15,10 @@ type transformContract struct {
 }
 
 type fieldMapping struct {
-	SourceField      string               `json:"source_field"`
 	DestinationField string               `json:"destination_field"`
+	SourceType       string               `json:"source_type"`
+	SourceField      string               `json:"source_field"`
+	SourceConstant   string               `json:"source_constant"`
 	Transformation   *fieldTransformation `json:"transformation"`
 	Confidence       float64              `json:"confidence"`
 }
@@ -29,6 +31,11 @@ type executionPlan struct {
 	BatchSize         int     `json:"batch_size"`
 	ErrorThreshold    float64 `json:"error_threshold"`
 	ValidationEnabled bool    `json:"validation_enabled"`
+}
+
+// Valid source types for field mappings.
+var validSourceTypes = map[string]bool{
+	"field": true, "null": true, "constant": true, "unmapped": true,
 }
 
 // Valid transformation types.
@@ -57,23 +64,39 @@ func verifyTransformation(data []byte) []string {
 
 	for i, m := range tc.FieldMappings {
 		prefix := fmt.Sprintf("field_mappings[%d]", i)
-
-		if m.SourceField == "" {
-			issues = append(issues, prefix+": missing source_field")
+		label := m.DestinationField
+		if label == "" {
+			label = fmt.Sprintf("#%d", i)
 		}
+
 		if m.DestinationField == "" {
 			issues = append(issues, prefix+": missing destination_field")
 		}
+
+		// Validate source_type
+		if m.SourceType != "" && !validSourceTypes[m.SourceType] {
+			issues = append(issues, fmt.Sprintf(
+				"%s (%s): unknown source_type %q", prefix, label, m.SourceType))
+		}
+
+		// When source_type is "field", source_field must be set
+		if m.SourceType == "field" && m.SourceField == "" {
+			issues = append(issues, fmt.Sprintf(
+				"%s (%s): source_type is \"field\" but source_field is empty", prefix, label))
+		}
+
 		if m.Confidence < 0 || m.Confidence > 1 {
 			issues = append(issues, fmt.Sprintf(
-				"%s: confidence %.2f out of range [0, 1]", prefix, m.Confidence))
+				"%s (%s): confidence %.2f out of range [0, 1]", prefix, label, m.Confidence))
 		}
+
 		if m.Transformation != nil {
 			if m.Transformation.Type == "" {
-				issues = append(issues, prefix+".transformation: missing type")
+				issues = append(issues, fmt.Sprintf(
+					"%s (%s).transformation: missing type", prefix, label))
 			} else if !validTransformTypes[m.Transformation.Type] {
 				issues = append(issues, fmt.Sprintf(
-					"%s.transformation: unknown type %q", prefix, m.Transformation.Type))
+					"%s (%s).transformation: unknown type %q", prefix, label, m.Transformation.Type))
 			}
 		}
 	}
@@ -91,40 +114,70 @@ func verifyTransformation(data []byte) []string {
 	return issues
 }
 
+// destFieldInfo holds the name, nullability, and constraints of a
+// destination field, extracted from the destination contract.
+type destFieldInfo struct {
+	nullable    bool
+	constraints []string // constraint type names: "not_null", "primary_key", etc.
+}
+
 // TransformationWithContext validates a transformation contract against
-// its source and destination contracts. In addition to structural validation,
-// it checks that every mapped source_field exists in the source contract and
-// every mapped destination_field exists in the destination contract.
+// its source and destination contracts. In addition to structural
+// validation, it checks:
+//   - source_field references exist in the source contract
+//   - destination_field references exist in the destination contract
+//   - non-nullable destination fields have a source mapping (not null, not unmapped)
+//   - primary key destination fields have a source mapping
 func TransformationWithContext(transformData, sourceData, destData []byte) Result {
-	// First, structurally validate the transformation.
 	base := Verify(transformData)
 	if !base.Valid {
 		return base
 	}
 
 	var tc transformContract
-	_ = json.Unmarshal(transformData, &tc) // already validated
+	_ = json.Unmarshal(transformData, &tc)
 
-	// Extract source field names.
 	sourceFields := extractFieldNames(sourceData)
-	destFields := extractDestFieldNames(destData)
+	destFields := extractDestFieldInfo(destData)
 
 	var issues []string
 
-	for i, m := range tc.FieldMappings {
-		prefix := fmt.Sprintf("field_mappings[%d]", i)
+	for _, m := range tc.FieldMappings {
+		label := m.DestinationField // always non-empty (structural validation ensures this)
 
-		if sourceFields != nil && m.SourceField != "" {
+		// Cross-reference: source field exists?
+		if m.SourceType == "field" && m.SourceField != "" && sourceFields != nil {
 			if !sourceFields[m.SourceField] {
 				issues = append(issues, fmt.Sprintf(
-					"%s: source_field %q not found in source contract", prefix, m.SourceField))
+					"'%s': source field '%s' not found in source contract",
+					label, m.SourceField))
 			}
 		}
 
-		if destFields != nil && m.DestinationField != "" {
-			if !destFields[m.DestinationField] {
+		// Cross-reference: destination field exists and check constraints
+		if m.DestinationField != "" && destFields != nil {
+			info, exists := destFields[m.DestinationField]
+			if !exists {
 				issues = append(issues, fmt.Sprintf(
-					"%s: destination_field %q not found in destination contract", prefix, m.DestinationField))
+					"'%s': destination field not found in destination contract", label))
+				continue
+			}
+
+			// Check null/unmapped against non-nullable constraints
+			if m.SourceType == "null" && !info.nullable {
+				constraintList := formatConstraints(info.constraints)
+				issues = append(issues, fmt.Sprintf(
+					"'%s' is NOT NULL%s but mapped to NULL",
+					label, constraintList))
+			}
+
+			// Both "unmapped" and empty source_type (zero value) mean
+			// the user hasn't decided. Flag non-nullable fields.
+			if (m.SourceType == "unmapped" || m.SourceType == "") && !info.nullable {
+				constraintList := formatConstraints(info.constraints)
+				issues = append(issues, fmt.Sprintf(
+					"'%s' is NOT NULL%s and has no source mapping",
+					label, constraintList))
 			}
 		}
 	}
@@ -134,6 +187,22 @@ func TransformationWithContext(transformData, sourceData, destData []byte) Resul
 		ContractType: "transformation",
 		Issues:       issues,
 	}
+}
+
+// formatConstraints returns a human-readable suffix like " (PRIMARY KEY)"
+// or "" if no noteworthy constraints exist beyond NOT NULL.
+func formatConstraints(constraints []string) string {
+	for _, c := range constraints {
+		switch c {
+		case "primary_key":
+			return " (PRIMARY KEY)"
+		case "unique":
+			return " (UNIQUE)"
+		case "foreign_key":
+			return " (FOREIGN KEY)"
+		}
+	}
+	return ""
 }
 
 // extractFieldNames extracts field names from a source contract (CSV, JSON).
@@ -153,24 +222,39 @@ func extractFieldNames(data []byte) map[string]bool {
 	return names
 }
 
-// extractDestFieldNames extracts field names from a destination contract
-// (DataContract with schemas). Collects fields across all schemas.
-func extractDestFieldNames(data []byte) map[string]bool {
+// extractDestFieldInfo extracts field names with nullability and constraints
+// from a destination contract (DataContract with schemas).
+// Note: if multiple schemas have fields with the same name, the last one
+// wins. The frontend enforces single-schema selection, so this is not a
+// problem in practice. A future improvement could include schema name
+// in the mapping to resolve ambiguity.
+func extractDestFieldInfo(data []byte) map[string]destFieldInfo {
 	var raw struct {
 		Schemas []struct {
 			Fields []struct {
-				Name string `json:"name"`
+				Name        string `json:"name"`
+				Nullable    bool   `json:"nullable"`
+				Constraints []struct {
+					Type string `json:"type"`
+				} `json:"constraints"`
 			} `json:"fields"`
 		} `json:"schemas"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil
 	}
-	names := make(map[string]bool)
+	result := make(map[string]destFieldInfo)
 	for _, s := range raw.Schemas {
 		for _, f := range s.Fields {
-			names[f.Name] = true
+			var constraints []string
+			for _, c := range f.Constraints {
+				constraints = append(constraints, c.Type)
+			}
+			result[f.Name] = destFieldInfo{
+				nullable:    f.Nullable,
+				constraints: constraints,
+			}
 		}
 	}
-	return names
+	return result
 }

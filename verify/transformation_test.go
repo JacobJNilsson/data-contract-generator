@@ -21,7 +21,7 @@ func TestVerifyTransformation_MissingSourceRef(t *testing.T) {
 		"contract_type": "transformation",
 		"source_ref": "",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
@@ -33,7 +33,7 @@ func TestVerifyTransformation_MissingDestRef(t *testing.T) {
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
@@ -52,77 +52,82 @@ func TestVerifyTransformation_NoMappings(t *testing.T) {
 	assertInvalid(t, r, "no field_mappings")
 }
 
-func TestVerifyTransformation_MissingSourceField(t *testing.T) {
-	data := `{
-		"contract_type": "transformation",
-		"source_ref": "src",
-		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "", "destination_field": "b", "confidence": 1.0}],
-		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
-	}`
-	r := Verify([]byte(data))
-	assertInvalid(t, r, "missing source_field")
-}
-
 func TestVerifyTransformation_MissingDestField(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "", "source_type": "field", "source_field": "a", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
 	assertInvalid(t, r, "missing destination_field")
 }
 
-func TestVerifyTransformation_ConfidenceOutOfRange(t *testing.T) {
+func TestVerifyTransformation_UnknownSourceType(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.5}],
+		"field_mappings": [{"destination_field": "a", "source_type": "magic", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "confidence")
-	assertInvalid(t, r, "out of range")
+	assertInvalid(t, r, "unknown source_type")
 }
 
-func TestVerifyTransformation_NegativeConfidence(t *testing.T) {
+func TestVerifyTransformation_FieldTypeEmptySourceField(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": -0.1}],
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "confidence")
+	assertInvalid(t, r, "source_field is empty")
 }
 
-func TestVerifyTransformation_UnknownTransformType(t *testing.T) {
+func TestVerifyTransformation_NullTypeValid(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0, "transformation": {"type": "magic"}}],
+		"field_mappings": [{"destination_field": "bio", "source_type": "null", "confidence": 0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "unknown type")
+	if !r.Valid {
+		t.Errorf("expected valid for null source_type, got: %v", r.Issues)
+	}
 }
 
-func TestVerifyTransformation_EmptyTransformType(t *testing.T) {
+func TestVerifyTransformation_ConstantTypeValid(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0, "transformation": {"type": ""}}],
+		"field_mappings": [{"destination_field": "status", "source_type": "constant", "source_constant": "active", "confidence": 0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
-	assertInvalid(t, r, "missing type")
+	if !r.Valid {
+		t.Errorf("expected valid for constant source_type, got: %v", r.Issues)
+	}
+}
+
+func TestVerifyTransformation_UnmappedTypeValid(t *testing.T) {
+	data := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "todo", "source_type": "unmapped", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := Verify([]byte(data))
+	if !r.Valid {
+		t.Errorf("expected valid for unmapped source_type, got: %v", r.Issues)
+	}
 }
 
 func TestVerifyTransformation_ValidTransformTypes(t *testing.T) {
@@ -131,7 +136,7 @@ func TestVerifyTransformation_ValidTransformTypes(t *testing.T) {
 			"contract_type": "transformation",
 			"source_ref": "src",
 			"destination_ref": "dest",
-			"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0, "transformation": {"type": "` + tt + `"}}],
+			"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0, "transformation": {"type": "` + tt + `"}}],
 			"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 		}`
 		r := Verify([]byte(data))
@@ -141,12 +146,24 @@ func TestVerifyTransformation_ValidTransformTypes(t *testing.T) {
 	}
 }
 
+func TestVerifyTransformation_ConfidenceOutOfRange(t *testing.T) {
+	data := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.5}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := Verify([]byte(data))
+	assertInvalid(t, r, "confidence")
+}
+
 func TestVerifyTransformation_NegativeBatchSize(t *testing.T) {
 	data := `{
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0}],
 		"execution_plan": {"batch_size": -1, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
@@ -158,7 +175,7 @@ func TestVerifyTransformation_ErrorThresholdOutOfRange(t *testing.T) {
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "a", "destination_field": "b", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 2.0, "validation_enabled": true}
 	}`
 	r := Verify([]byte(data))
@@ -169,6 +186,30 @@ func TestVerifyTransformation_BadJSON(t *testing.T) {
 	data := `{"contract_type": "transformation", "field_mappings": "not an array"}`
 	r := Verify([]byte(data))
 	assertInvalid(t, r, "failed to parse")
+}
+
+func TestVerifyTransformation_EmptyTransformType(t *testing.T) {
+	data := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0, "transformation": {"type": ""}}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := Verify([]byte(data))
+	assertInvalid(t, r, "missing type")
+}
+
+func TestVerifyTransformation_UnknownTransformType(t *testing.T) {
+	data := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "a", "source_type": "field", "source_field": "b", "confidence": 1.0, "transformation": {"type": "magic"}}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := Verify([]byte(data))
+	assertInvalid(t, r, "unknown type")
 }
 
 // --- Cross-reference validation tests --------------------------------------
@@ -189,7 +230,7 @@ func TestVerifyWithContext_SourceFieldNotFound(t *testing.T) {
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "nonexistent", "destination_field": "id", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "name", "source_type": "field", "source_field": "nonexistent", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := TransformationWithContext(
@@ -197,7 +238,7 @@ func TestVerifyWithContext_SourceFieldNotFound(t *testing.T) {
 		[]byte(validSourceForTransform()),
 		[]byte(validDestForTransform()),
 	)
-	assertInvalid(t, r, "source_field \"nonexistent\" not found in source")
+	assertInvalid(t, r, "source field 'nonexistent' not found")
 }
 
 func TestVerifyWithContext_DestFieldNotFound(t *testing.T) {
@@ -205,7 +246,7 @@ func TestVerifyWithContext_DestFieldNotFound(t *testing.T) {
 		"contract_type": "transformation",
 		"source_ref": "src",
 		"destination_ref": "dest",
-		"field_mappings": [{"source_field": "name", "destination_field": "ghost", "confidence": 1.0}],
+		"field_mappings": [{"destination_field": "ghost", "source_type": "field", "source_field": "name", "confidence": 1.0}],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
 	r := TransformationWithContext(
@@ -213,12 +254,157 @@ func TestVerifyWithContext_DestFieldNotFound(t *testing.T) {
 		[]byte(validSourceForTransform()),
 		[]byte(validDestForTransform()),
 	)
-	assertInvalid(t, r, "destination_field \"ghost\" not found in destination")
+	assertInvalid(t, r, "destination field not found")
+}
+
+func TestVerifyWithContext_NullOnNonNullable(t *testing.T) {
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "id", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	assertInvalid(t, r, "'id' is NOT NULL")
+	assertInvalid(t, r, "PRIMARY KEY")
+	assertInvalid(t, r, "mapped to NULL")
+}
+
+func TestVerifyWithContext_UnmappedNonNullable(t *testing.T) {
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "name", "source_type": "unmapped", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	assertInvalid(t, r, "'name' is NOT NULL")
+	assertInvalid(t, r, "no source mapping")
+}
+
+func TestVerifyWithContext_NullOnNullableOK(t *testing.T) {
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "bio", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	if !r.Valid {
+		t.Errorf("expected valid (null on nullable), got: %v", r.Issues)
+	}
+}
+
+func TestVerifyWithContext_ConstantOnNonNullableOK(t *testing.T) {
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "name", "source_type": "constant", "source_constant": "default", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	if !r.Valid {
+		t.Errorf("expected valid (constant on non-nullable), got: %v", r.Issues)
+	}
+}
+
+func TestVerifyWithContext_NullOnUniqueNonNullable(t *testing.T) {
+	dest := `{
+		"contract_type": "destination",
+		"id": "db",
+		"schemas": [{"name": "t", "fields": [
+			{"name": "email", "data_type": "varchar", "nullable": false, "constraints": [{"type": "unique"}, {"type": "not_null"}]}
+		]}]
+	}`
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "email", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext([]byte(transform), []byte(validSourceForTransform()), []byte(dest))
+	assertInvalid(t, r, "UNIQUE")
+}
+
+func TestVerifyWithContext_NullOnForeignKeyNonNullable(t *testing.T) {
+	dest := `{
+		"contract_type": "destination",
+		"id": "db",
+		"schemas": [{"name": "t", "fields": [
+			{"name": "user_id", "data_type": "integer", "nullable": false, "constraints": [{"type": "foreign_key"}, {"type": "not_null"}]}
+		]}]
+	}`
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "user_id", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext([]byte(transform), []byte(validSourceForTransform()), []byte(dest))
+	assertInvalid(t, r, "FOREIGN KEY")
+}
+
+func TestVerifyWithContext_EmptySourceTypeOnNonNullable(t *testing.T) {
+	// Empty source_type (zero value) should be treated same as "unmapped"
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "name", "source_type": "", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	assertInvalid(t, r, "'name' is NOT NULL")
+	assertInvalid(t, r, "no source mapping")
+}
+
+func TestVerifyWithContext_MultipleConstraintsShowsMostImportant(t *testing.T) {
+	// A field with both primary_key and unique shows PRIMARY KEY (highest priority)
+	dest := `{
+		"contract_type": "destination",
+		"id": "db",
+		"schemas": [{"name": "t", "fields": [
+			{"name": "id", "data_type": "integer", "nullable": false, "constraints": [{"type": "primary_key"}, {"type": "unique"}, {"type": "not_null"}]}
+		]}]
+	}`
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "id", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext([]byte(transform), []byte(validSourceForTransform()), []byte(dest))
+	assertInvalid(t, r, "PRIMARY KEY")
 }
 
 func TestVerifyWithContext_StructuralFailure(t *testing.T) {
-	// If the transformation itself is structurally invalid, cross-reference
-	// is skipped and the structural issues are returned.
 	r := TransformationWithContext(
 		[]byte(`{"contract_type": "transformation"}`),
 		[]byte(validSourceForTransform()),
@@ -230,8 +416,6 @@ func TestVerifyWithContext_StructuralFailure(t *testing.T) {
 }
 
 func TestVerifyWithContext_BadSourceJSON(t *testing.T) {
-	// If source contract can't be parsed, cross-reference is skipped
-	// (sourceFields is nil, no cross-reference issues).
 	r := TransformationWithContext(
 		[]byte(validTransformContract()),
 		[]byte(`not json`),
@@ -239,6 +423,45 @@ func TestVerifyWithContext_BadSourceJSON(t *testing.T) {
 	)
 	if !r.Valid {
 		t.Errorf("expected valid (bad source skips cross-ref), got: %v", r.Issues)
+	}
+}
+
+func TestVerifyWithContext_NullOnNonNullableNoConstraints(t *testing.T) {
+	// A non-nullable field with no explicit constraints (just nullable: false)
+	dest := `{
+		"contract_type": "destination",
+		"id": "db",
+		"schemas": [{"name": "t", "fields": [
+			{"name": "required_field", "data_type": "text", "nullable": false}
+		]}]
+	}`
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "required_field", "source_type": "null", "confidence": 0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext([]byte(transform), []byte(validSourceForTransform()), []byte(dest))
+	assertInvalid(t, r, "NOT NULL")
+}
+
+func TestVerifyWithContext_FieldOnNullableSkipsConstraintCheck(t *testing.T) {
+	// A mapped field on a nullable destination — should always pass
+	transform := `{
+		"contract_type": "transformation",
+		"source_ref": "src",
+		"destination_ref": "dest",
+		"field_mappings": [{"destination_field": "bio", "source_type": "field", "source_field": "name", "confidence": 1.0}],
+		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
+	}`
+	r := TransformationWithContext(
+		[]byte(transform),
+		[]byte(validSourceForTransform()),
+		[]byte(validDestForTransform()),
+	)
+	if !r.Valid {
+		t.Errorf("expected valid, got: %v", r.Issues)
 	}
 }
 
@@ -262,8 +485,8 @@ func validTransformContract() string {
 		"source_ref": "src",
 		"destination_ref": "dest",
 		"field_mappings": [
-			{"source_field": "name", "destination_field": "name", "confidence": 1.0},
-			{"source_field": "age", "destination_field": "age", "confidence": 0.9, "transformation": {"type": "cast"}}
+			{"destination_field": "name", "source_type": "field", "source_field": "name", "confidence": 1.0},
+			{"destination_field": "age", "source_type": "field", "source_field": "age", "confidence": 0.9, "transformation": {"type": "cast"}}
 		],
 		"execution_plan": {"batch_size": 100, "error_threshold": 0.1, "validation_enabled": true}
 	}`
@@ -287,9 +510,10 @@ func validDestForTransform() string {
 		"schemas": [{
 			"name": "users",
 			"fields": [
-				{"name": "name", "data_type": "varchar"},
-				{"name": "age", "data_type": "integer"},
-				{"name": "id", "data_type": "integer"}
+				{"name": "id", "data_type": "integer", "nullable": false, "constraints": [{"type": "primary_key"}, {"type": "not_null"}]},
+				{"name": "name", "data_type": "varchar", "nullable": false, "constraints": [{"type": "not_null"}]},
+				{"name": "age", "data_type": "integer", "nullable": true},
+				{"name": "bio", "data_type": "text", "nullable": true}
 			]
 		}]
 	}`
