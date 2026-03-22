@@ -8,6 +8,9 @@ build:
 	go build ./...
 
 test: db-start
+	go test -race -coverprofile=coverage.out ./profile/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL profile %.1f%% < 100%%\n", $$1; exit 1} else {printf "profile: %.1f%%\n", $$1}}'
 	go test -race -coverprofile=coverage.out ./csvcontract/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 100) {printf "FAIL csvcontract %.1f%% < 100%%\n", $$1; exit 1} else {printf "csvcontract: %.1f%%\n", $$1}}'

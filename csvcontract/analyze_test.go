@@ -11,14 +11,16 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/JacobJNilsson/data-contract-generator/profile"
 )
 
 var ctx = context.Background()
 
 func ptr(s string) *string { return &s }
 
-func tv(value string, count int) TopValue {
-	return TopValue{Value: value, Count: count}
+func tv(value string, count int) profile.TopValue {
+	return profile.TopValue{Value: value, Count: count}
 }
 
 func TestAnalyzeSimpleCSV(t *testing.T) {
@@ -34,25 +36,25 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    5,
 		Fields: []Field{
-			{Name: "Name", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Name", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Alice"), MaxValue: ptr("Eve"),
-				TopValues: []TopValue{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
+				TopValues: []profile.TopValue{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
 			}},
-			{Name: "Age", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "Age", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("25"), MaxValue: ptr("35"),
-				TopValues: []TopValue{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
+				TopValues: []profile.TopValue{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
 			}},
-			{Name: "City", DataType: TypeText, Profile: FieldProfile{
+			{Name: "City", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Berlin"), MaxValue: ptr("Tokyo"),
-				TopValues: []TopValue{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
+				TopValues: []profile.TopValue{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
 			}},
-			{Name: "Score", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "Score", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("87.3"), MaxValue: ptr("95.5"),
-				TopValues: []TopValue{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
+				TopValues: []profile.TopValue{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -79,30 +81,30 @@ func TestAnalyzeEuropeanCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    5,
 		Fields: []Field{
-			{Name: "Date", DataType: TypeDate, Profile: FieldProfile{
+			{Name: "Date", DataType: profile.TypeDate, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("2024-01-19"),
-				TopValues: []TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
+				TopValues: []profile.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
 			}},
-			{Name: "Account", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Account", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Depot"), MaxValue: ptr("Savings"),
-				TopValues: []TopValue{tv("Depot", 3), tv("Savings", 2)},
+				TopValues: []profile.TopValue{tv("Depot", 3), tv("Savings", 2)},
 			}},
-			{Name: "Amount", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "Amount", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("910,11"), MaxValue: ptr("5678,90"),
-				TopValues: []TopValue{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
+				TopValues: []profile.TopValue{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
 			}},
-			{Name: "Currency", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Currency", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("SEK"), MaxValue: ptr("SEK"),
-				TopValues: []TopValue{tv("SEK", 5)},
+				TopValues: []profile.TopValue{tv("SEK", 5)},
 			}},
-			{Name: "Quantity", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "Quantity", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("50"), MaxValue: ptr("200"),
-				TopValues: []TopValue{tv("100", 1), tv("200", 1), tv("50", 1)},
+				TopValues: []profile.TopValue{tv("100", 1), tv("200", 1), tv("50", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -129,20 +131,20 @@ func TestAnalyzeNoHeader(t *testing.T) {
 		HasHeader:    false,
 		TotalRows:    3,
 		Fields: []Field{
-			{Name: "column_1", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "column_1", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("3"),
-				TopValues: []TopValue{tv("1", 1), tv("2", 1), tv("3", 1)},
+				TopValues: []profile.TopValue{tv("1", 1), tv("2", 1), tv("3", 1)},
 			}},
-			{Name: "column_2", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "column_2", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("100"), MaxValue: ptr("300"),
-				TopValues: []TopValue{tv("100", 1), tv("200", 1), tv("300", 1)},
+				TopValues: []profile.TopValue{tv("100", 1), tv("200", 1), tv("300", 1)},
 			}},
-			{Name: "column_3", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "column_3", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1.41"), MaxValue: ptr("3.14"),
-				TopValues: []TopValue{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
+				TopValues: []profile.TopValue{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -167,9 +169,9 @@ func TestAnalyzeEmptyCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    0,
 		Fields: []Field{
-			{Name: "Name", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
-			{Name: "Age", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
-			{Name: "City", DataType: TypeEmpty, Profile: FieldProfile{TopValues: []TopValue{}}},
+			{Name: "Name", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
+			{Name: "Age", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
+			{Name: "City", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
 		},
 		SampleData: nil,
 		Issues:     nil,
@@ -189,25 +191,25 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    5,
 		Fields: []Field{
-			{Name: "ID", DataType: TypeNumeric, Profile: FieldProfile{
+			{Name: "ID", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("5"),
-				TopValues: []TopValue{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
+				TopValues: []profile.TopValue{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
 			}},
-			{Name: "Value", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Value", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("100"), MaxValue: ptr("hello"),
-				TopValues: []TopValue{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
+				TopValues: []profile.TopValue{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
 			}},
-			{Name: "Date", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Date", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("not-a-date"),
-				TopValues: []TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
+				TopValues: []profile.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
 			}},
-			{Name: "Notes", DataType: TypeText, Profile: FieldProfile{
+			{Name: "Notes", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("fifth entry"), MaxValue: ptr("third entry"),
-				TopValues: []TopValue{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
+				TopValues: []profile.TopValue{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -248,8 +250,8 @@ func TestAnalyzeAllEmptyColumn(t *testing.T) {
 	}
 
 	notes := contract.Fields[1]
-	if notes.DataType != TypeEmpty {
-		t.Errorf("Notes data_type = %q, want %q", notes.DataType, TypeEmpty)
+	if notes.DataType != profile.TypeEmpty {
+		t.Errorf("Notes data_type = %q, want %q", notes.DataType, profile.TypeEmpty)
 	}
 	if notes.Profile.NullCount != 3 {
 		t.Errorf("Notes null_count = %d, want 3", notes.Profile.NullCount)
@@ -288,8 +290,8 @@ func TestAnalyzeSingleColumn(t *testing.T) {
 	if contract.Fields[0].Name != "Email" {
 		t.Errorf("field name = %q, want %q", contract.Fields[0].Name, "Email")
 	}
-	if contract.Fields[0].DataType != TypeText {
-		t.Errorf("data_type = %q, want %q", contract.Fields[0].DataType, TypeText)
+	if contract.Fields[0].DataType != profile.TypeText {
+		t.Errorf("data_type = %q, want %q", contract.Fields[0].DataType, profile.TypeText)
 	}
 }
 
@@ -316,8 +318,8 @@ func TestAnalyzeLargeNumbers(t *testing.T) {
 	}
 
 	rev := contract.Fields[1]
-	if rev.DataType != TypeNumeric {
-		t.Errorf("Revenue data_type = %q, want %q", rev.DataType, TypeNumeric)
+	if rev.DataType != profile.TypeNumeric {
+		t.Errorf("Revenue data_type = %q, want %q", rev.DataType, profile.TypeNumeric)
 	}
 }
 
@@ -328,8 +330,8 @@ func TestAnalyzeDatesMultiFormat(t *testing.T) {
 	}
 
 	eventDate := contract.Fields[1]
-	if eventDate.DataType != TypeDate {
-		t.Errorf("EventDate data_type = %q, want %q", eventDate.DataType, TypeDate)
+	if eventDate.DataType != profile.TypeDate {
+		t.Errorf("EventDate data_type = %q, want %q", eventDate.DataType, profile.TypeDate)
 	}
 }
 
@@ -397,8 +399,8 @@ func TestAnalyzeInlineCSV(t *testing.T) {
 	if contract.Fields[0].Profile.NullCount != 2 {
 		t.Errorf("A null_count = %d, want 2", contract.Fields[0].Profile.NullCount)
 	}
-	if contract.Fields[0].DataType != TypeNumeric {
-		t.Errorf("A data_type = %q, want %q", contract.Fields[0].DataType, TypeNumeric)
+	if contract.Fields[0].DataType != profile.TypeNumeric {
+		t.Errorf("A data_type = %q, want %q", contract.Fields[0].DataType, profile.TypeNumeric)
 	}
 }
 
@@ -828,7 +830,7 @@ func assertFields(t *testing.T, got, want []Field) {
 	}
 }
 
-func assertProfile(t *testing.T, prefix string, got, want FieldProfile) {
+func assertProfile(t *testing.T, prefix string, got, want profile.FieldProfile) {
 	t.Helper()
 	if got.TotalCount != want.TotalCount {
 		t.Errorf("%s: total_count = %d, want %d", prefix, got.TotalCount, want.TotalCount)
@@ -844,7 +846,7 @@ func assertProfile(t *testing.T, prefix string, got, want FieldProfile) {
 	assertTopValues(t, prefix, got.TopValues, want.TopValues)
 }
 
-func assertTopValues(t *testing.T, prefix string, got, want []TopValue) {
+func assertTopValues(t *testing.T, prefix string, got, want []profile.TopValue) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Errorf("%s: top_values len = %d, want %d (got %v)", prefix, len(got), len(want), got)
@@ -901,5 +903,31 @@ func assertIssues(t *testing.T, got, want []string) {
 		if got[i] != want[i] {
 			t.Errorf("issues[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestOptionsDefaults(t *testing.T) {
+	// Nil options use defaults.
+	var nilOpts *Options
+	if nilOpts.topN() != 5 {
+		t.Errorf("nil topN() = %d, want 5", nilOpts.topN())
+	}
+	if nilOpts.maxTracked() != 10000 {
+		t.Errorf("nil maxTracked() = %d, want 10000", nilOpts.maxTracked())
+	}
+	if nilOpts.maxSampleRows() != 5 {
+		t.Errorf("nil maxSampleRows() = %d, want 5", nilOpts.maxSampleRows())
+	}
+
+	// Explicit values override defaults.
+	opts := &Options{TopN: 3, MaxTracked: 42, MaxSampleRows: 10}
+	if opts.topN() != 3 {
+		t.Errorf("topN() = %d, want 3", opts.topN())
+	}
+	if opts.maxTracked() != 42 {
+		t.Errorf("maxTracked() = %d, want 42", opts.maxTracked())
+	}
+	if opts.maxSampleRows() != 10 {
+		t.Errorf("maxSampleRows() = %d, want 10", opts.maxSampleRows())
 	}
 }

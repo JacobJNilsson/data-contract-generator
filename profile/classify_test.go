@@ -1,4 +1,4 @@
-package csvcontract
+package profile
 
 import "testing"
 
@@ -27,9 +27,9 @@ func TestClassifyCell(t *testing.T) {
 		{"10000000.00", TypeNumeric},
 	}
 	for _, tt := range tests {
-		got := classifyCell(tt.input)
+		got := ClassifyCell(tt.input)
 		if got != tt.want {
-			t.Errorf("classifyCell(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("ClassifyCell(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
@@ -52,9 +52,9 @@ func TestIsDate(t *testing.T) {
 		{"99/99/9999", true}, // same: format only
 	}
 	for _, tt := range tests {
-		got := isDate(tt.input)
+		got := IsDate(tt.input)
 		if got != tt.want {
-			t.Errorf("isDate(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsDate(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -88,9 +88,9 @@ func TestIsNumeric(t *testing.T) {
 		{"\"\"", false},        // quoted empty string
 	}
 	for _, tt := range tests {
-		got := isNumeric(tt.input)
+		got := IsNumeric(tt.input)
 		if got != tt.want {
-			t.Errorf("isNumeric(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsNumeric(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -105,9 +105,9 @@ func TestIsUSFormatNumber(t *testing.T) {
 		{"abc.def", false},
 	}
 	for _, tt := range tests {
-		got := isUSFormatNumber(tt.input)
+		got := IsUSFormatNumber(tt.input)
 		if got != tt.want {
-			t.Errorf("isUSFormatNumber(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsUSFormatNumber(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -122,9 +122,9 @@ func TestIsEuropeanFormatNumber(t *testing.T) {
 		{"abc,def", false},
 	}
 	for _, tt := range tests {
-		got := isEuropeanFormatNumber(tt.input)
+		got := IsEuropeanFormatNumber(tt.input)
 		if got != tt.want {
-			t.Errorf("isEuropeanFormatNumber(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsEuropeanFormatNumber(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -141,9 +141,9 @@ func TestIsUSThousandsOnly(t *testing.T) {
 		{",234", false},  // empty first part
 	}
 	for _, tt := range tests {
-		got := isUSThousandsOnly(tt.input)
+		got := IsUSThousandsOnly(tt.input)
 		if got != tt.want {
-			t.Errorf("isUSThousandsOnly(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsUSThousandsOnly(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -161,9 +161,9 @@ func TestIsEuropeanDecimalOnly(t *testing.T) {
 		{"no comma", false},
 	}
 	for _, tt := range tests {
-		got := isEuropeanDecimalOnly(tt.input)
+		got := IsEuropeanDecimalOnly(tt.input)
 		if got != tt.want {
-			t.Errorf("isEuropeanDecimalOnly(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsEuropeanDecimalOnly(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -181,9 +181,9 @@ func TestIsPlainNumber(t *testing.T) {
 		{"1.2.3", false},
 	}
 	for _, tt := range tests {
-		got := isPlainNumber(tt.input)
+		got := IsPlainNumber(tt.input)
 		if got != tt.want {
-			t.Errorf("isPlainNumber(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsPlainNumber(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -198,9 +198,9 @@ func TestAllDigits(t *testing.T) {
 		{"12a3", false},
 	}
 	for _, tt := range tests {
-		got := allDigits(tt.input)
+		got := AllDigits(tt.input)
 		if got != tt.want {
-			t.Errorf("allDigits(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("AllDigits(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
@@ -216,38 +216,38 @@ func TestAllDigitsAndSep(t *testing.T) {
 		{"1a234", ',', false},
 	}
 	for _, tt := range tests {
-		got := allDigitsAndSep(tt.input, tt.sep)
+		got := AllDigitsAndSep(tt.input, tt.sep)
 		if got != tt.want {
-			t.Errorf("allDigitsAndSep(%q, %c) = %v, want %v", tt.input, tt.sep, got, tt.want)
+			t.Errorf("AllDigitsAndSep(%q, %c) = %v, want %v", tt.input, tt.sep, got, tt.want)
 		}
 	}
 }
 
 func TestMergeTypes(t *testing.T) {
 	// Text always wins.
-	if mergeTypes(TypeNumeric, TypeText) != TypeText {
+	if MergeTypes(TypeNumeric, TypeText) != TypeText {
 		t.Error("text should override numeric")
 	}
-	if mergeTypes(TypeDate, TypeText) != TypeText {
+	if MergeTypes(TypeDate, TypeText) != TypeText {
 		t.Error("text should override date")
 	}
 	// Date beats numeric.
-	if mergeTypes(TypeNumeric, TypeDate) != TypeDate {
+	if MergeTypes(TypeNumeric, TypeDate) != TypeDate {
 		t.Error("date should override numeric")
 	}
 	// Numeric beats empty.
-	if mergeTypes(TypeEmpty, TypeNumeric) != TypeNumeric {
+	if MergeTypes(TypeEmpty, TypeNumeric) != TypeNumeric {
 		t.Error("numeric should override empty")
 	}
 	// Lower priority doesn't override.
-	if mergeTypes(TypeText, TypeNumeric) != TypeText {
+	if MergeTypes(TypeText, TypeNumeric) != TypeText {
 		t.Error("numeric should not override text")
 	}
 }
 
 func TestTypePriorityUnknown(t *testing.T) {
 	// An unknown DataType should get priority 0 (same as empty).
-	if typePriority(DataType("unknown")) != 0 {
+	if TypePriority(DataType("unknown")) != 0 {
 		t.Error("unknown type should have priority 0")
 	}
 }

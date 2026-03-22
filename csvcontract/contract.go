@@ -2,6 +2,8 @@
 // describing their structure, encoding, schema, and data quality.
 package csvcontract
 
+import "github.com/JacobJNilsson/data-contract-generator/profile"
+
 // SourceContract is the complete analysis result for a CSV file.
 type SourceContract struct {
 	SourceFormat string     `json:"source_format"`
@@ -17,37 +19,10 @@ type SourceContract struct {
 
 // Field describes a single column in the CSV file.
 type Field struct {
-	Name     string       `json:"name"`
-	DataType DataType     `json:"data_type"`
-	Profile  FieldProfile `json:"profile"`
+	Name     string               `json:"name"`
+	DataType profile.DataType     `json:"data_type"`
+	Profile  profile.FieldProfile `json:"profile"`
 }
-
-// FieldProfile contains statistical observations about a column's values.
-type FieldProfile struct {
-	TotalCount     int        `json:"total_count"`
-	NullCount      int        `json:"null_count"`
-	NullPercentage float64    `json:"null_percentage"`
-	MinValue       *string    `json:"min_value"`
-	MaxValue       *string    `json:"max_value"`
-	TopValues      []TopValue `json:"top_values"`
-}
-
-// TopValue pairs a value with how many times it appears in the data.
-type TopValue struct {
-	Value string `json:"value"`
-	Count int    `json:"count"`
-}
-
-// DataType represents the inferred type of a CSV column.
-type DataType string
-
-// Supported data types for CSV columns.
-const (
-	TypeText    DataType = "text"
-	TypeNumeric DataType = "numeric"
-	TypeDate    DataType = "date"
-	TypeEmpty   DataType = "empty"
-)
 
 // Options controls the analysis behavior. A nil Options uses defaults.
 type Options struct {

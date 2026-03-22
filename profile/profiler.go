@@ -1,43 +1,43 @@
-package csvcontract
+package profile
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
 
-// columnProfiler collects statistics for a single column incrementally,
+// ColumnProfiler collects statistics for a single column incrementally,
 // one value at a time. It tracks null counts, min/max, and a capped
 // frequency map for the top-N most common values.
-type columnProfiler struct {
+type ColumnProfiler struct {
 	totalCount int
 	nullCount  int
 	freqs      map[string]int
 	maxTracked int
 	capped     bool
-	tracker    rangeTracker
+	tracker    RangeTracker
 }
 
-// newColumnProfiler creates a profiler that tracks up to maxTracked
+// NewColumnProfiler creates a profiler that tracks up to maxTracked
 // distinct values for frequency counting.
-func newColumnProfiler(maxTracked int) *columnProfiler {
-	return &columnProfiler{
+func NewColumnProfiler(maxTracked int) *ColumnProfiler {
+	return &ColumnProfiler{
 		freqs:      make(map[string]int),
 		maxTracked: maxTracked,
 	}
 }
 
-// observe records a single cell value.
-func (p *columnProfiler) observe(value string) {
+// Observe records a single cell value.
+func (p *ColumnProfiler) Observe(value string) {
 	p.totalCount++
 
-	if isNull(value) {
+	if IsNull(value) {
 		p.nullCount++
 		return
 	}
 
-	p.tracker.observe(value)
+	p.tracker.Observe(value)
 
 	if count, exists := p.freqs[value]; exists {
 		p.freqs[value] = count + 1
@@ -48,12 +48,12 @@ func (p *columnProfiler) observe(value string) {
 	}
 }
 
-// finish computes the final FieldProfile from the accumulated state.
-func (p *columnProfiler) finish(topN int) FieldProfile {
+// Finish computes the final FieldProfile from the accumulated state.
+func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 	var minVal, maxVal *string
 	if p.tracker.seen {
-		mn := p.tracker.min()
-		mx := p.tracker.max()
+		mn := p.tracker.Min()
+		mx := p.tracker.Max()
 		minVal = &mn
 		maxVal = &mx
 	}
@@ -75,7 +75,7 @@ func (p *columnProfiler) finish(topN int) FieldProfile {
 
 // topValues returns the topN most frequent values, sorted by count
 // descending, then by value ascending for stable ordering.
-func (p *columnProfiler) topValues(topN int) []TopValue {
+func (p *ColumnProfiler) topValues(topN int) []TopValue {
 	if len(p.freqs) == 0 {
 		return []TopValue{}
 	}
@@ -85,11 +85,11 @@ func (p *columnProfiler) topValues(topN int) []TopValue {
 		entries = append(entries, TopValue{Value: v, Count: c})
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].Count != entries[j].Count {
-			return entries[i].Count > entries[j].Count
+	slices.SortFunc(entries, func(a, b TopValue) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
 		}
-		return entries[i].Value < entries[j].Value
+		return strings.Compare(a.Value, b.Value)
 	})
 
 	if len(entries) > topN {
@@ -98,14 +98,14 @@ func (p *columnProfiler) topValues(topN int) []TopValue {
 	return entries
 }
 
-// rangeTracker tracks the minimum and maximum values seen so far,
+// RangeTracker tracks the minimum and maximum values seen so far,
 // using numeric-aware comparison. When all observed values are parseable
 // as numbers, it compares numerically (so "9" < "10"). When any non-numeric
 // value is seen, it falls back to lexicographic comparison.
 //
 // Both numeric and lexicographic min/max are tracked simultaneously so
 // that switching modes does not require storing all observed values.
-type rangeTracker struct {
+type RangeTracker struct {
 	// Numeric min/max (used when allNumeric is true).
 	minNum, maxNum float64
 	minStr, maxStr string // string representations of the numeric extremes
@@ -114,8 +114,9 @@ type rangeTracker struct {
 	seen, allNumeric bool
 }
 
-func (t *rangeTracker) observe(v string) {
-	numVal, isNum := parseNumeric(v)
+// Observe records a value for range tracking.
+func (t *RangeTracker) Observe(v string) {
+	numVal, isNum := ParseNumeric(v)
 
 	if !t.seen {
 		t.minNum = numVal
@@ -154,31 +155,36 @@ func (t *rangeTracker) observe(v string) {
 	}
 }
 
-// min returns the minimum value observed, using numeric comparison when
+// Min returns the minimum value observed, using numeric comparison when
 // all values were numeric, otherwise lexicographic.
-func (t *rangeTracker) min() string {
+func (t *RangeTracker) Min() string {
 	if t.allNumeric {
 		return t.minStr
 	}
 	return t.lexMin
 }
 
-// max returns the maximum value observed.
-func (t *rangeTracker) max() string {
+// Max returns the maximum value observed.
+func (t *RangeTracker) Max() string {
 	if t.allNumeric {
 		return t.maxStr
 	}
 	return t.lexMax
 }
 
-// isNull returns true if the value is empty or whitespace-only.
-func isNull(v string) bool {
+// Seen returns whether any values have been observed.
+func (t *RangeTracker) Seen() bool {
+	return t.seen
+}
+
+// IsNull returns true if the value is empty or whitespace-only.
+func IsNull(v string) bool {
 	return strings.TrimSpace(v) == ""
 }
 
-// parseNumeric attempts to parse a string as a float64, handling both
+// ParseNumeric attempts to parse a string as a float64, handling both
 // US (1,234.56) and European (1.234,56) number formats.
-func parseNumeric(s string) (float64, bool) {
+func ParseNumeric(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	s = strings.Trim(s, "\"")
 	if s == "" {

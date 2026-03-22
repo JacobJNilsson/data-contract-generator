@@ -1,4 +1,4 @@
-package csvcontract
+package profile
 
 import "testing"
 
@@ -17,15 +17,15 @@ func TestDetectHeader(t *testing.T) {
 		{"negative numbers", []string{"-1", "-2", "-3"}, false},
 	}
 	for _, tt := range tests {
-		got := detectHeader(tt.row)
+		got := DetectHeader(tt.row)
 		if got != tt.want {
-			t.Errorf("detectHeader(%s) = %v, want %v", tt.name, got, tt.want)
+			t.Errorf("DetectHeader(%s) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
 
 func TestGenerateFieldNames(t *testing.T) {
-	names := generateFieldNames(3)
+	names := GenerateFieldNames(3)
 	want := []string{"column_1", "column_2", "column_3"}
 	if len(names) != len(want) {
 		t.Fatalf("len = %d, want %d", len(names), len(want))
