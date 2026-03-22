@@ -29,51 +29,53 @@ func New(transformID, sourceRef, destRef string) *Contract {
 	}
 }
 
-// SuggestMappings attempts to match source fields to destination fields
-// and returns a list of suggested mappings with confidence scores.
+// SuggestMappings returns a mapping for every source field. Fields that
+// match a destination field (by name or normalized name) get the
+// suggested destination with a confidence score. Unmatched source fields
+// get an empty destination_field and confidence 0, signaling that the
+// user needs to map them manually.
 //
 // Matching strategy (in priority order):
 //  1. Exact name match (case-insensitive): confidence 1.0
 //  2. Normalized name match (underscores/hyphens removed): confidence 0.8
-//  3. Type-compatible unmatched fields: confidence 0.3
-//
-// Fields that don't match anything are omitted. The caller should review
-// and adjust the suggestions before using them.
 func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMapping {
-	var mappings []FieldMapping
+	// Pre-allocate: one mapping per source field.
+	mappings := make([]FieldMapping, len(source))
+	for i, sf := range source {
+		mappings[i] = FieldMapping{
+			SourceField: sf.Name,
+			Confidence:  0,
+		}
+	}
 
 	// Track which destination fields have been matched.
 	matched := make(map[int]bool, len(dest))
 
 	// Pass 1: exact name match (case-insensitive).
-	for _, sf := range source {
+	for i, sf := range source {
 		for j, df := range dest {
 			if matched[j] {
 				continue
 			}
 			if strings.EqualFold(sf.Name, df.Name) {
-				m := FieldMapping{
-					SourceField:      sf.Name,
-					DestinationField: df.Name,
-					Confidence:       1.0,
-				}
+				mappings[i].DestinationField = df.Name
+				mappings[i].Confidence = 1.0
 				if needsCast(sf.DataType, df.DataType) {
-					m.Transformation = &FieldTransformation{
+					mappings[i].Transformation = &FieldTransformation{
 						Type:       TypeCast,
 						Parameters: map[string]any{"target_type": df.DataType},
 					}
-					m.Confidence = 0.9
+					mappings[i].Confidence = 0.9
 				}
-				mappings = append(mappings, m)
 				matched[j] = true
 				break
 			}
 		}
 	}
 
-	// Pass 2: normalized name match.
-	for _, sf := range source {
-		if isSourceMatched(mappings, sf.Name) {
+	// Pass 2: normalized name match (only for unmatched source fields).
+	for i, sf := range source {
+		if mappings[i].DestinationField != "" {
 			continue
 		}
 		normSrc := normalize(sf.Name)
@@ -82,19 +84,15 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 				continue
 			}
 			if normSrc == normalize(df.Name) {
-				m := FieldMapping{
-					SourceField:      sf.Name,
-					DestinationField: df.Name,
-					Confidence:       0.8,
-					Transformation: &FieldTransformation{
-						Type:       TypeRename,
-						Parameters: map[string]any{"from": sf.Name, "to": df.Name},
-					},
+				mappings[i].DestinationField = df.Name
+				mappings[i].Confidence = 0.8
+				mappings[i].Transformation = &FieldTransformation{
+					Type:       TypeRename,
+					Parameters: map[string]any{"from": sf.Name, "to": df.Name},
 				}
 				if needsCast(sf.DataType, df.DataType) {
-					m.Confidence = 0.7
+					mappings[i].Confidence = 0.7
 				}
-				mappings = append(mappings, m)
 				matched[j] = true
 				break
 			}
@@ -134,14 +132,4 @@ func needsCast(srcType, destType string) bool {
 	}
 
 	return true
-}
-
-// isSourceMatched checks if a source field name already has a mapping.
-func isSourceMatched(mappings []FieldMapping, name string) bool {
-	for _, m := range mappings {
-		if m.SourceField == name {
-			return true
-		}
-	}
-	return false
 }

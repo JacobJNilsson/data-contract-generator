@@ -170,8 +170,17 @@ func TestSuggestMappingsNoMatch(t *testing.T) {
 	dst := []DestinationField{{Name: "bar", DataType: "text"}}
 
 	mappings := SuggestMappings(src, dst)
-	if len(mappings) != 0 {
-		t.Errorf("mappings = %d, want 0 (no match)", len(mappings))
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %d, want 1 (unmatched source field included)", len(mappings))
+	}
+	if mappings[0].SourceField != "foo" {
+		t.Errorf("source_field = %q, want foo", mappings[0].SourceField)
+	}
+	if mappings[0].DestinationField != "" {
+		t.Errorf("destination_field = %q, want empty (no match)", mappings[0].DestinationField)
+	}
+	if mappings[0].Confidence != 0 {
+		t.Errorf("confidence = %f, want 0 (no match)", mappings[0].Confidence)
 	}
 }
 
