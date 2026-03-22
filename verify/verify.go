@@ -46,6 +46,8 @@ func Verify(data []byte) Result {
 		issues = verifySource(data)
 	case "destination":
 		issues = verifyDestination(data)
+	case "transformation":
+		issues = verifyTransformation(data)
 	default:
 		issues = []string{fmt.Sprintf("unknown contract_type: %q", ct)}
 	}
