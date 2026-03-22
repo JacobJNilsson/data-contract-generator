@@ -40,11 +40,17 @@ func New(transformID, sourceRef, destRef string) *Contract {
 //  1. Exact name match (case-insensitive): confidence 1.0
 //  2. Normalized name match (underscores/hyphens removed): confidence 0.8
 func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMapping {
-	// One mapping per destination field.
+	// One mapping per destination field. Unmatched fields default to
+	// null for nullable fields, empty source_type for non-nullable.
 	mappings := make([]FieldMapping, len(dest))
 	for i, df := range dest {
+		st := SourceTypeNull
+		if !df.Nullable {
+			st = SourceTypeUnmapped
+		}
 		mappings[i] = FieldMapping{
 			DestinationField: df.Name,
+			SourceType:       st,
 			Confidence:       0,
 		}
 	}
@@ -59,6 +65,7 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 				continue
 			}
 			if strings.EqualFold(df.Name, sf.Name) {
+				mappings[i].SourceType = SourceTypeField
 				mappings[i].SourceField = sf.Name
 				mappings[i].Confidence = 1.0
 				if needsCast(sf.DataType, df.DataType) {
@@ -76,7 +83,7 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 
 	// Pass 2: normalized name match (only for unmatched destination fields).
 	for i, df := range dest {
-		if mappings[i].SourceField != "" {
+		if mappings[i].SourceType == SourceTypeField {
 			continue
 		}
 		normDst := normalize(df.Name)
@@ -85,14 +92,17 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 				continue
 			}
 			if normDst == normalize(sf.Name) {
+				mappings[i].SourceType = SourceTypeField
 				mappings[i].SourceField = sf.Name
 				mappings[i].Confidence = 0.8
+				params := map[string]any{"from": sf.Name, "to": df.Name}
+				if needsCast(sf.DataType, df.DataType) {
+					params["target_type"] = df.DataType
+					mappings[i].Confidence = 0.7
+				}
 				mappings[i].Transformation = &FieldTransformation{
 					Type:       TypeRename,
-					Parameters: map[string]any{"from": sf.Name, "to": df.Name},
-				}
-				if needsCast(sf.DataType, df.DataType) {
-					mappings[i].Confidence = 0.7
+					Parameters: params,
 				}
 				matched[j] = true
 				break
@@ -120,16 +130,18 @@ func needsCast(srcType, destType string) bool {
 		return false
 	}
 
-	// Compatible type pairs that don't need an explicit cast.
-	compatible := map[string]map[string]bool{
-		"text":    {"varchar": true, "char": true, "text": true},
-		"numeric": {"integer": true, "bigint": true, "smallint": true, "numeric": true, "real": true, "double": true},
-		"date":    {"date": true, "timestamp": true, "timestamptz": true},
-		"boolean": {"boolean": true},
+	// Groups of compatible types that don't need an explicit cast
+	// in either direction.
+	groups := []map[string]bool{
+		{"text": true, "varchar": true, "char": true},
+		{"integer": true, "bigint": true, "smallint": true, "numeric": true, "real": true, "double": true},
+		{"date": true, "timestamp": true, "timestamptz": true},
 	}
 
-	if targets, ok := compatible[srcNorm]; ok {
-		return !targets[destNorm]
+	for _, group := range groups {
+		if group[srcNorm] && group[destNorm] {
+			return false
+		}
 	}
 
 	return true

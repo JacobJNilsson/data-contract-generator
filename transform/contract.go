@@ -14,14 +14,35 @@ type Contract struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 }
 
-// FieldMapping maps a single destination field to a source field,
-// with an optional transformation.
+// FieldMapping maps a single destination field to a source, which can be
+// a source field, an explicit null, or a constant value.
 type FieldMapping struct {
-	SourceField      string               `json:"source_field"`
 	DestinationField string               `json:"destination_field"`
+	SourceType       SourceType           `json:"source_type"`
+	SourceField      string               `json:"source_field,omitempty"`
+	SourceConstant   string               `json:"source_constant,omitempty"`
 	Transformation   *FieldTransformation `json:"transformation,omitempty"`
-	Confidence       float64              `json:"confidence"` // 0.0 to 1.0
+	Confidence       float64              `json:"confidence"`
 }
+
+// SourceType indicates how the destination field gets its value.
+type SourceType string
+
+// Supported source types for field mappings.
+const (
+	// SourceTypeUnmapped means the user has not yet decided how to fill
+	// this destination field. Verification will flag non-nullable fields
+	// with this source type as needing attention.
+	SourceTypeUnmapped SourceType = "unmapped"
+	// SourceTypeField maps from a source field.
+	SourceTypeField SourceType = "field"
+	// SourceTypeNull sets the destination field to null.
+	SourceTypeNull SourceType = "null"
+	// SourceTypeConstant sets the destination field to a constant value.
+	// SuggestMappings never generates this — it is set by the user or
+	// AI agent when a fixed value is desired.
+	SourceTypeConstant SourceType = "constant"
+)
 
 // FieldTransformation describes how to convert a source value to fit
 // the destination.
