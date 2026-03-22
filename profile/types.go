@@ -2,6 +2,8 @@
 // and header detection used by file-based source analyzers (CSV, Excel).
 package profile
 
+import "github.com/JacobJNilsson/data-contract-generator/contract"
+
 // DataType represents the inferred type of a column.
 type DataType string
 
@@ -13,20 +15,17 @@ const (
 	TypeEmpty   DataType = "empty"
 )
 
-// TopValue pairs a value with how many times it appears in the data.
-type TopValue struct {
-	Value string `json:"value"`
-	Count int    `json:"count"`
-}
-
 // FieldProfile contains statistical observations about a column's values.
+// TotalCount tracks the number of rows observed (used internally by
+// profilers). Callers map this to contract.FieldProfile.SampleSize.
 type FieldProfile struct {
-	TotalCount     int        `json:"total_count"`
-	NullCount      int        `json:"null_count"`
-	NullPercentage float64    `json:"null_percentage"`
-	MinValue       *string    `json:"min_value"`
-	MaxValue       *string    `json:"max_value"`
-	TopValues      []TopValue `json:"top_values"`
+	TotalCount     int                 `json:"total_count"`
+	NullCount      int                 `json:"null_count"`
+	NullPercentage float64             `json:"null_percentage"`
+	DistinctCount  int                 `json:"distinct_count"`
+	MinValue       *string             `json:"min_value"`
+	MaxValue       *string             `json:"max_value"`
+	TopValues      []contract.TopValue `json:"top_values"`
 }
 
 // Options controls the analysis behavior. A nil Options uses defaults.

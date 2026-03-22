@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
 // ColumnProfiler collects statistics for a single column incrementally,
@@ -67,6 +69,7 @@ func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 		TotalCount:     p.totalCount,
 		NullCount:      p.nullCount,
 		NullPercentage: nullPct,
+		DistinctCount:  len(p.freqs),
 		MinValue:       minVal,
 		MaxValue:       maxVal,
 		TopValues:      p.topValues(topN),
@@ -75,17 +78,17 @@ func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 
 // topValues returns the topN most frequent values, sorted by count
 // descending, then by value ascending for stable ordering.
-func (p *ColumnProfiler) topValues(topN int) []TopValue {
+func (p *ColumnProfiler) topValues(topN int) []contract.TopValue {
 	if len(p.freqs) == 0 {
-		return []TopValue{}
+		return []contract.TopValue{}
 	}
 
-	entries := make([]TopValue, 0, len(p.freqs))
+	entries := make([]contract.TopValue, 0, len(p.freqs))
 	for v, c := range p.freqs {
-		entries = append(entries, TopValue{Value: v, Count: c})
+		entries = append(entries, contract.TopValue{Value: v, Count: c})
 	}
 
-	slices.SortFunc(entries, func(a, b TopValue) int {
+	slices.SortFunc(entries, func(a, b contract.TopValue) int {
 		if a.Count != b.Count {
 			return b.Count - a.Count
 		}

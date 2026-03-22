@@ -81,6 +81,13 @@ jobs:
           echo "transform: ${COVERAGE}%"
           awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
 
+      - name: Test excelcontract (95%)
+        run: |
+          go test -race -coverprofile=coverage.out ./excelcontract/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "excelcontract: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
+
       - name: Test supacontract (95%)
         run: |
           go test -race -coverprofile=coverage.out ./supacontract/...

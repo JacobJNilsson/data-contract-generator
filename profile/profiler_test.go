@@ -1,6 +1,8 @@
 package profile
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestColumnProfilerEmpty(t *testing.T) {
 	p := NewColumnProfiler(100)
@@ -44,6 +46,9 @@ func TestColumnProfilerNumeric(t *testing.T) {
 	}
 	if result.MaxValue == nil || *result.MaxValue != "20" {
 		t.Errorf("max_value = %v, want 20", result.MaxValue)
+	}
+	if result.DistinctCount != 3 {
+		t.Errorf("distinct_count = %d, want 3", result.DistinctCount)
 	}
 	// "5" appears twice, should be top.
 	if len(result.TopValues) != 3 {
@@ -114,6 +119,10 @@ func TestColumnProfilerCapped(t *testing.T) {
 	result := p.Finish(10)
 	if result.TotalCount != 5 {
 		t.Errorf("total_count = %d, want 5", result.TotalCount)
+	}
+	// DistinctCount is capped at maxTracked (3), even though 4 distinct values were observed.
+	if result.DistinctCount != 3 {
+		t.Errorf("distinct_count = %d, want 3", result.DistinctCount)
 	}
 	// "a" should have count 2, "b" and "c" have count 1.
 	// "d" should not appear.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	ct "github.com/JacobJNilsson/data-contract-generator/contract"
 	"github.com/JacobJNilsson/data-contract-generator/profile"
 )
 
@@ -19,8 +20,8 @@ var ctx = context.Background()
 
 func ptr(s string) *string { return &s }
 
-func tv(value string, count int) profile.TopValue {
-	return profile.TopValue{Value: value, Count: count}
+func tv(value string, count int) ct.TopValue {
+	return ct.TopValue{Value: value, Count: count}
 }
 
 func TestAnalyzeSimpleCSV(t *testing.T) {
@@ -39,22 +40,22 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 			{Name: "Name", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Alice"), MaxValue: ptr("Eve"),
-				TopValues: []profile.TopValue{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
+				TopValues: []ct.TopValue{tv("Alice", 1), tv("Bob", 1), tv("Charlie", 1), tv("Diana", 1), tv("Eve", 1)},
 			}},
 			{Name: "Age", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("25"), MaxValue: ptr("35"),
-				TopValues: []profile.TopValue{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
+				TopValues: []ct.TopValue{tv("25", 1), tv("28", 1), tv("30", 1), tv("32", 1), tv("35", 1)},
 			}},
 			{Name: "City", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Berlin"), MaxValue: ptr("Tokyo"),
-				TopValues: []profile.TopValue{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
+				TopValues: []ct.TopValue{tv("Berlin", 1), tv("London", 1), tv("New York", 1), tv("Paris", 1), tv("Tokyo", 1)},
 			}},
 			{Name: "Score", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("87.3"), MaxValue: ptr("95.5"),
-				TopValues: []profile.TopValue{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
+				TopValues: []ct.TopValue{tv("87.3", 1), tv("88.9", 1), tv("92.1", 1), tv("95.5", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -84,27 +85,27 @@ func TestAnalyzeEuropeanCSV(t *testing.T) {
 			{Name: "Date", DataType: profile.TypeDate, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("2024-01-19"),
-				TopValues: []profile.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
+				TopValues: []ct.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-17", 1), tv("2024-01-18", 1), tv("2024-01-19", 1)},
 			}},
 			{Name: "Account", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("Depot"), MaxValue: ptr("Savings"),
-				TopValues: []profile.TopValue{tv("Depot", 3), tv("Savings", 2)},
+				TopValues: []ct.TopValue{tv("Depot", 3), tv("Savings", 2)},
 			}},
 			{Name: "Amount", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("910,11"), MaxValue: ptr("5678,90"),
-				TopValues: []profile.TopValue{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
+				TopValues: []ct.TopValue{tv("1234,56", 1), tv("5678,90", 1), tv("910,11", 1)},
 			}},
 			{Name: "Currency", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("SEK"), MaxValue: ptr("SEK"),
-				TopValues: []profile.TopValue{tv("SEK", 5)},
+				TopValues: []ct.TopValue{tv("SEK", 5)},
 			}},
 			{Name: "Quantity", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 2, NullPercentage: 40,
 				MinValue: ptr("50"), MaxValue: ptr("200"),
-				TopValues: []profile.TopValue{tv("100", 1), tv("200", 1), tv("50", 1)},
+				TopValues: []ct.TopValue{tv("100", 1), tv("200", 1), tv("50", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -134,17 +135,17 @@ func TestAnalyzeNoHeader(t *testing.T) {
 			{Name: "column_1", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("3"),
-				TopValues: []profile.TopValue{tv("1", 1), tv("2", 1), tv("3", 1)},
+				TopValues: []ct.TopValue{tv("1", 1), tv("2", 1), tv("3", 1)},
 			}},
 			{Name: "column_2", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("100"), MaxValue: ptr("300"),
-				TopValues: []profile.TopValue{tv("100", 1), tv("200", 1), tv("300", 1)},
+				TopValues: []ct.TopValue{tv("100", 1), tv("200", 1), tv("300", 1)},
 			}},
 			{Name: "column_3", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 3, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1.41"), MaxValue: ptr("3.14"),
-				TopValues: []profile.TopValue{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
+				TopValues: []ct.TopValue{tv("1.41", 1), tv("2.72", 1), tv("3.14", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -169,9 +170,9 @@ func TestAnalyzeEmptyCSV(t *testing.T) {
 		HasHeader:    true,
 		TotalRows:    0,
 		Fields: []Field{
-			{Name: "Name", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
-			{Name: "Age", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
-			{Name: "City", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []profile.TopValue{}}},
+			{Name: "Name", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []ct.TopValue{}}},
+			{Name: "Age", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []ct.TopValue{}}},
+			{Name: "City", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []ct.TopValue{}}},
 		},
 		SampleData: nil,
 		Issues:     nil,
@@ -194,22 +195,22 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 			{Name: "ID", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("1"), MaxValue: ptr("5"),
-				TopValues: []profile.TopValue{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
+				TopValues: []ct.TopValue{tv("1", 1), tv("2", 1), tv("3", 1), tv("4", 1), tv("5", 1)},
 			}},
 			{Name: "Value", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("100"), MaxValue: ptr("hello"),
-				TopValues: []profile.TopValue{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
+				TopValues: []ct.TopValue{tv("100", 1), tv("300", 1), tv("500", 1), tv("hello", 1)},
 			}},
 			{Name: "Date", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 0, NullPercentage: 0,
 				MinValue: ptr("2024-01-15"), MaxValue: ptr("not-a-date"),
-				TopValues: []profile.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
+				TopValues: []ct.TopValue{tv("2024-01-15", 1), tv("2024-01-16", 1), tv("2024-01-18", 1), tv("2024-01-19", 1), tv("not-a-date", 1)},
 			}},
 			{Name: "Notes", DataType: profile.TypeText, Profile: profile.FieldProfile{
 				TotalCount: 5, NullCount: 1, NullPercentage: 20,
 				MinValue: ptr("fifth entry"), MaxValue: ptr("third entry"),
-				TopValues: []profile.TopValue{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
+				TopValues: []ct.TopValue{tv("fifth entry", 1), tv("first entry", 1), tv("second entry", 1), tv("third entry", 1)},
 			}},
 		},
 		SampleData: [][]string{
@@ -846,7 +847,7 @@ func assertProfile(t *testing.T, prefix string, got, want profile.FieldProfile) 
 	assertTopValues(t, prefix, got.TopValues, want.TopValues)
 }
 
-func assertTopValues(t *testing.T, prefix string, got, want []profile.TopValue) {
+func assertTopValues(t *testing.T, prefix string, got, want []ct.TopValue) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Errorf("%s: top_values len = %d, want %d (got %v)", prefix, len(got), len(want), got)
