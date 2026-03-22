@@ -141,14 +141,14 @@ func TestSuggestMappingsNormalizedWithCast(t *testing.T) {
 }
 
 func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
-	// "name" matches exactly in pass 1. Pass 2 should not try to match it again.
+	// "name" matches exactly in pass 1. "userid" matches "user_id" via normalize in pass 2.
 	src := []SourceField{
 		{Name: "name", DataType: "text"},
 		{Name: "user_id", DataType: "numeric"},
 	}
 	dst := []DestinationField{
 		{Name: "name", DataType: "text"},
-		{Name: "userid", DataType: "integer"}, // normalized match for user_id
+		{Name: "userid", DataType: "integer"},
 	}
 
 	mappings := SuggestMappings(src, dst)
@@ -156,9 +156,17 @@ func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
 
-	// name matched exactly (pass 1), user_id matched normalized (pass 2)
+	// name → name (exact match, pass 1)
+	if mappings[0].DestinationField != "name" || mappings[0].SourceField != "name" {
+		t.Errorf("mapping[0] = %s → %s, want name → name", mappings[0].SourceField, mappings[0].DestinationField)
+	}
 	if mappings[0].Confidence != 1.0 {
 		t.Errorf("mapping[0] confidence = %f, want 1.0", mappings[0].Confidence)
+	}
+
+	// userid → user_id (normalized match, pass 2)
+	if mappings[1].DestinationField != "userid" || mappings[1].SourceField != "user_id" {
+		t.Errorf("mapping[1] = %s → %s, want user_id → userid", mappings[1].SourceField, mappings[1].DestinationField)
 	}
 	if mappings[1].Confidence != 0.8 {
 		t.Errorf("mapping[1] confidence = %f, want 0.8", mappings[1].Confidence)
@@ -171,13 +179,13 @@ func TestSuggestMappingsNoMatch(t *testing.T) {
 
 	mappings := SuggestMappings(src, dst)
 	if len(mappings) != 1 {
-		t.Fatalf("mappings = %d, want 1 (unmatched source field included)", len(mappings))
+		t.Fatalf("mappings = %d, want 1 (one per destination field)", len(mappings))
 	}
-	if mappings[0].SourceField != "foo" {
-		t.Errorf("source_field = %q, want foo", mappings[0].SourceField)
+	if mappings[0].DestinationField != "bar" {
+		t.Errorf("destination_field = %q, want bar", mappings[0].DestinationField)
 	}
-	if mappings[0].DestinationField != "" {
-		t.Errorf("destination_field = %q, want empty (no match)", mappings[0].DestinationField)
+	if mappings[0].SourceField != "" {
+		t.Errorf("source_field = %q, want empty (no match)", mappings[0].SourceField)
 	}
 	if mappings[0].Confidence != 0 {
 		t.Errorf("confidence = %f, want 0 (no match)", mappings[0].Confidence)
