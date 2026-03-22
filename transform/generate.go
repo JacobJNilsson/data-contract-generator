@@ -15,33 +15,40 @@ type DestinationField struct {
 	Nullable bool
 }
 
-// New creates a transformation contract skeleton with the given references
-// and default execution plan. Field mappings are left empty for the caller
+// NamedSourceFields pairs a source reference label with its fields.
+type NamedSourceFields struct {
+	Ref    string
+	Fields []SourceField
+}
+
+// New creates a transformation contract skeleton with a single source
+// and destination. Field mappings are left empty for the caller
 // (typically an AI agent) to populate.
 func New(transformID, sourceRef, destRef string) *Contract {
 	return &Contract{
-		ContractType:   "transformation",
-		TransformID:    transformID,
-		SourceRef:      sourceRef,
-		DestinationRef: destRef,
-		FieldMappings:  []FieldMapping{},
-		ExecutionPlan:  DefaultExecutionPlan(),
+		ContractType:    "transformation",
+		TransformID:     transformID,
+		SourceRefs:      []string{sourceRef},
+		DestinationRefs: []string{destRef},
+		MappingGroups: []MappingGroup{{
+			DestinationRef: destRef,
+			FieldMappings:  []FieldMapping{},
+		}},
+		ExecutionPlan: DefaultExecutionPlan(),
 	}
 }
 
-// SuggestMappings returns a mapping for every destination field. The
-// destination schema is the target — every field needs to be accounted
-// for. Matched destination fields get a suggested source_field with a
-// confidence score. Unmatched destination fields get an empty
-// source_field and confidence 0, signaling the user needs to map them
-// manually (or accept a null/default value).
+// SuggestMappings returns a mapping for every destination field, drawing
+// from one or more named source field sets. Each matched mapping includes
+// the SourceRef identifying which source the field comes from.
 //
 // Matching strategy (in priority order):
 //  1. Exact name match (case-insensitive): confidence 1.0
 //  2. Normalized name match (underscores/hyphens removed): confidence 0.8
-func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMapping {
-	// One mapping per destination field. Unmatched fields default to
-	// null for nullable fields, empty source_type for non-nullable.
+//
+// When multiple sources have a field with the same name, the first source
+// in the slice wins.
+func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []FieldMapping {
 	mappings := make([]FieldMapping, len(dest))
 	for i, df := range dest {
 		st := SourceTypeNull
@@ -55,27 +62,38 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 		}
 	}
 
-	// Track which source fields have been matched.
-	matched := make(map[int]bool, len(source))
+	// Build a flat list of source fields with their ref, for matching.
+	type qualifiedField struct {
+		ref   string
+		field SourceField
+		used  bool
+	}
+	var allFields []*qualifiedField
+	for _, src := range sources {
+		for _, f := range src.Fields {
+			allFields = append(allFields, &qualifiedField{ref: src.Ref, field: f})
+		}
+	}
 
 	// Pass 1: exact name match (case-insensitive).
 	for i, df := range dest {
-		for j, sf := range source {
-			if matched[j] {
+		for _, qf := range allFields {
+			if qf.used {
 				continue
 			}
-			if strings.EqualFold(df.Name, sf.Name) {
+			if strings.EqualFold(df.Name, qf.field.Name) {
 				mappings[i].SourceType = SourceTypeField
-				mappings[i].SourceField = sf.Name
+				mappings[i].SourceRef = qf.ref
+				mappings[i].SourceField = qf.field.Name
 				mappings[i].Confidence = 1.0
-				if needsCast(sf.DataType, df.DataType) {
+				if needsCast(qf.field.DataType, df.DataType) {
 					mappings[i].Transformation = &FieldTransformation{
 						Type:       TypeCast,
 						Parameters: map[string]any{"target_type": df.DataType},
 					}
 					mappings[i].Confidence = 0.9
 				}
-				matched[j] = true
+				qf.used = true
 				break
 			}
 		}
@@ -87,16 +105,17 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 			continue
 		}
 		normDst := normalize(df.Name)
-		for j, sf := range source {
-			if matched[j] {
+		for _, qf := range allFields {
+			if qf.used {
 				continue
 			}
-			if normDst == normalize(sf.Name) {
+			if normDst == normalize(qf.field.Name) {
 				mappings[i].SourceType = SourceTypeField
-				mappings[i].SourceField = sf.Name
+				mappings[i].SourceRef = qf.ref
+				mappings[i].SourceField = qf.field.Name
 				mappings[i].Confidence = 0.8
-				params := map[string]any{"from": sf.Name, "to": df.Name}
-				if needsCast(sf.DataType, df.DataType) {
+				params := map[string]any{"from": qf.field.Name, "to": df.Name}
+				if needsCast(qf.field.DataType, df.DataType) {
 					params["target_type"] = df.DataType
 					mappings[i].Confidence = 0.7
 				}
@@ -104,7 +123,7 @@ func SuggestMappings(source []SourceField, dest []DestinationField) []FieldMappi
 					Type:       TypeRename,
 					Parameters: params,
 				}
-				matched[j] = true
+				qf.used = true
 				break
 			}
 		}

@@ -16,14 +16,20 @@ func TestNew(t *testing.T) {
 	if c.TransformID != "t1" {
 		t.Errorf("transformation_id = %q, want t1", c.TransformID)
 	}
-	if c.SourceRef != "source-csv" {
-		t.Errorf("source_ref = %q, want source-csv", c.SourceRef)
+	if len(c.SourceRefs) != 1 || c.SourceRefs[0] != "source-csv" {
+		t.Errorf("source_refs = %v, want [source-csv]", c.SourceRefs)
 	}
-	if c.DestinationRef != "dest-pg" {
-		t.Errorf("destination_ref = %q, want dest-pg", c.DestinationRef)
+	if len(c.DestinationRefs) != 1 || c.DestinationRefs[0] != "dest-pg" {
+		t.Errorf("destination_refs = %v, want [dest-pg]", c.DestinationRefs)
 	}
-	if len(c.FieldMappings) != 0 {
-		t.Errorf("field_mappings should be empty, got %d", len(c.FieldMappings))
+	if len(c.MappingGroups) != 1 {
+		t.Fatalf("mapping_groups count = %d, want 1", len(c.MappingGroups))
+	}
+	if c.MappingGroups[0].DestinationRef != "dest-pg" {
+		t.Errorf("mapping_groups[0].destination_ref = %q, want dest-pg", c.MappingGroups[0].DestinationRef)
+	}
+	if len(c.MappingGroups[0].FieldMappings) != 0 {
+		t.Errorf("field_mappings should be empty, got %d", len(c.MappingGroups[0].FieldMappings))
 	}
 	if c.ExecutionPlan.BatchSize != 100 {
 		t.Errorf("batch_size = %d, want 100", c.ExecutionPlan.BatchSize)
@@ -51,9 +57,22 @@ func TestNewSerializesToJSON(t *testing.T) {
 	if raw["contract_type"] != "transformation" {
 		t.Errorf("JSON contract_type = %v", raw["contract_type"])
 	}
+	if raw["source_refs"] == nil {
+		t.Error("JSON should have source_refs")
+	}
+	if raw["destination_refs"] == nil {
+		t.Error("JSON should have destination_refs")
+	}
+	if raw["mapping_groups"] == nil {
+		t.Error("JSON should have mapping_groups")
+	}
 }
 
-// --- SuggestMappings tests --------------------------------------------------
+// --- SuggestMappings tests (single source) ----------------------------------
+
+func singleSource(fields []SourceField) []NamedSourceFields {
+	return []NamedSourceFields{{Ref: "source", Fields: fields}}
+}
 
 func TestSuggestMappingsExactMatch(t *testing.T) {
 	src := []SourceField{
@@ -65,7 +84,7 @@ func TestSuggestMappingsExactMatch(t *testing.T) {
 		{Name: "age", DataType: "integer"},
 	}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
@@ -74,6 +93,9 @@ func TestSuggestMappingsExactMatch(t *testing.T) {
 	m0 := mappings[0]
 	if m0.SourceType != SourceTypeField {
 		t.Errorf("mapping[0] source_type = %q, want field", m0.SourceType)
+	}
+	if m0.SourceRef != "source" {
+		t.Errorf("mapping[0] source_ref = %q, want source", m0.SourceRef)
 	}
 	if m0.SourceField != "name" || m0.DestinationField != "name" {
 		t.Errorf("mapping[0] = %s -> %s, want name -> name", m0.SourceField, m0.DestinationField)
@@ -102,7 +124,7 @@ func TestSuggestMappingsCaseInsensitive(t *testing.T) {
 	src := []SourceField{{Name: "Name", DataType: "text"}}
 	dst := []DestinationField{{Name: "name", DataType: "text"}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -115,7 +137,7 @@ func TestSuggestMappingsNormalizedMatch(t *testing.T) {
 	src := []SourceField{{Name: "first_name", DataType: "text"}}
 	dst := []DestinationField{{Name: "firstname", DataType: "varchar"}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -134,18 +156,16 @@ func TestSuggestMappingsNormalizedWithCast(t *testing.T) {
 	src := []SourceField{{Name: "created-at", DataType: "text"}}
 	dst := []DestinationField{{Name: "created_at", DataType: "timestamptz"}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
-	// Normalized match + needs cast: confidence drops to 0.7
 	if mappings[0].Confidence != 0.7 {
 		t.Errorf("confidence = %f, want 0.7 (normalized + cast needed)", mappings[0].Confidence)
 	}
 }
 
 func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
-	// "name" matches exactly in pass 1. "userid" matches "user_id" via normalize in pass 2.
 	src := []SourceField{
 		{Name: "name", DataType: "text"},
 		{Name: "user_id", DataType: "numeric"},
@@ -155,12 +175,11 @@ func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
 		{Name: "userid", DataType: "integer"},
 	}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
 
-	// name → name (exact match, pass 1)
 	if mappings[0].DestinationField != "name" || mappings[0].SourceField != "name" {
 		t.Errorf("mapping[0] = %s → %s, want name → name", mappings[0].SourceField, mappings[0].DestinationField)
 	}
@@ -168,7 +187,6 @@ func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
 		t.Errorf("mapping[0] confidence = %f, want 1.0", mappings[0].Confidence)
 	}
 
-	// userid → user_id (normalized match, pass 2)
 	if mappings[1].DestinationField != "userid" || mappings[1].SourceField != "user_id" {
 		t.Errorf("mapping[1] = %s → %s, want user_id → userid", mappings[1].SourceField, mappings[1].DestinationField)
 	}
@@ -181,7 +199,7 @@ func TestSuggestMappingsNoMatch_Nullable(t *testing.T) {
 	src := []SourceField{{Name: "foo", DataType: "text"}}
 	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: true}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -197,7 +215,7 @@ func TestSuggestMappingsNoMatch_NonNullable(t *testing.T) {
 	src := []SourceField{{Name: "foo", DataType: "text"}}
 	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: false}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -214,17 +232,15 @@ func TestSuggestMappingsEmpty(t *testing.T) {
 }
 
 func TestSuggestMappingsExactTakesPriority(t *testing.T) {
-	// If both exact and normalized would match, exact wins.
 	src := []SourceField{{Name: "email", DataType: "text"}}
 	dst := []DestinationField{
 		{Name: "email", DataType: "varchar"},
 	}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
-	// Exact match should not have rename transformation
 	if mappings[0].Transformation != nil && mappings[0].Transformation.Type == TypeRename {
 		t.Error("exact match should not produce a rename transformation")
 	}
@@ -234,7 +250,7 @@ func TestSuggestMappingsNeedsCast(t *testing.T) {
 	src := []SourceField{{Name: "active", DataType: "text"}}
 	dst := []DestinationField{{Name: "active", DataType: "boolean"}}
 
-	mappings := SuggestMappings(src, dst)
+	mappings := SuggestMappings(singleSource(src), dst)
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -249,6 +265,98 @@ func TestSuggestMappingsNeedsCast(t *testing.T) {
 	}
 }
 
+// --- Multi-source SuggestMappings tests ------------------------------------
+
+func TestSuggestMappingsMultiSource(t *testing.T) {
+	sources := []NamedSourceFields{
+		{Ref: "orders.csv", Fields: []SourceField{
+			{Name: "order_id", DataType: "integer"},
+			{Name: "customer_id", DataType: "integer"},
+			{Name: "amount", DataType: "numeric"},
+		}},
+		{Ref: "customers", Fields: []SourceField{
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+			{Name: "email", DataType: "varchar"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "order_id", DataType: "integer"},
+		{Name: "name", DataType: "varchar"},
+		{Name: "amount", DataType: "numeric"},
+		{Name: "email", DataType: "varchar"},
+	}
+
+	mappings := SuggestMappings(sources, dst)
+	if len(mappings) != 4 {
+		t.Fatalf("mappings = %d, want 4", len(mappings))
+	}
+
+	// order_id matches orders.csv
+	if mappings[0].SourceRef != "orders.csv" || mappings[0].SourceField != "order_id" {
+		t.Errorf("mapping[0] = %s:%s, want orders.csv:order_id", mappings[0].SourceRef, mappings[0].SourceField)
+	}
+
+	// name matches customers
+	if mappings[1].SourceRef != "customers" || mappings[1].SourceField != "name" {
+		t.Errorf("mapping[1] = %s:%s, want customers:name", mappings[1].SourceRef, mappings[1].SourceField)
+	}
+
+	// amount matches orders.csv
+	if mappings[2].SourceRef != "orders.csv" || mappings[2].SourceField != "amount" {
+		t.Errorf("mapping[2] = %s:%s, want orders.csv:amount", mappings[2].SourceRef, mappings[2].SourceField)
+	}
+
+	// email matches customers
+	if mappings[3].SourceRef != "customers" || mappings[3].SourceField != "email" {
+		t.Errorf("mapping[3] = %s:%s, want customers:email", mappings[3].SourceRef, mappings[3].SourceField)
+	}
+}
+
+func TestSuggestMappingsMultiSourceFirstWins(t *testing.T) {
+	// Both sources have "id". First source in the list wins.
+	sources := []NamedSourceFields{
+		{Ref: "orders", Fields: []SourceField{{Name: "id", DataType: "integer"}}},
+		{Ref: "customers", Fields: []SourceField{{Name: "id", DataType: "integer"}}},
+	}
+	dst := []DestinationField{{Name: "id", DataType: "integer"}}
+
+	mappings := SuggestMappings(sources, dst)
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %d, want 1", len(mappings))
+	}
+	if mappings[0].SourceRef != "orders" {
+		t.Errorf("source_ref = %q, want orders (first source wins)", mappings[0].SourceRef)
+	}
+}
+
+func TestSuggestMappingsMultiSourceCrossSourceNormalized(t *testing.T) {
+	// Exact match from source A, normalized match from source B for different fields.
+	sources := []NamedSourceFields{
+		{Ref: "file.csv", Fields: []SourceField{{Name: "order_id", DataType: "integer"}}},
+		{Ref: "db", Fields: []SourceField{{Name: "customer_name", DataType: "text"}}},
+	}
+	dst := []DestinationField{
+		{Name: "order_id", DataType: "integer"},
+		{Name: "customername", DataType: "varchar"},
+	}
+
+	mappings := SuggestMappings(sources, dst)
+	if len(mappings) != 2 {
+		t.Fatalf("mappings = %d, want 2", len(mappings))
+	}
+
+	// order_id: exact from file.csv
+	if mappings[0].SourceRef != "file.csv" || mappings[0].Confidence != 1.0 {
+		t.Errorf("mapping[0] = %s (%.1f), want file.csv (1.0)", mappings[0].SourceRef, mappings[0].Confidence)
+	}
+
+	// customername: normalized from db
+	if mappings[1].SourceRef != "db" || mappings[1].Confidence != 0.8 {
+		t.Errorf("mapping[1] = %s (%.1f), want db (0.8)", mappings[1].SourceRef, mappings[1].Confidence)
+	}
+}
+
 // --- needsCast tests --------------------------------------------------------
 
 func TestNeedsCast(t *testing.T) {
@@ -259,16 +367,16 @@ func TestNeedsCast(t *testing.T) {
 		{"text", "text", false},
 		{"text", "varchar", false},
 		{"text", "char", false},
-		{"varchar", "text", false}, // bidirectional
-		{"char", "varchar", false}, // bidirectional
+		{"varchar", "text", false},
+		{"char", "varchar", false},
 		{"numeric", "integer", false},
 		{"numeric", "bigint", false},
 		{"numeric", "real", false},
-		{"integer", "numeric", false}, // bidirectional
-		{"bigint", "integer", false},  // bidirectional
+		{"integer", "numeric", false},
+		{"bigint", "integer", false},
 		{"date", "timestamp", false},
 		{"date", "timestamptz", false},
-		{"timestamp", "date", false}, // bidirectional
+		{"timestamp", "date", false},
 		{"boolean", "boolean", false},
 		{"text", "boolean", true},
 		{"text", "integer", true},

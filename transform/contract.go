@@ -1,24 +1,34 @@
 // Package transform defines transformation contracts that map source
-// fields to destination fields. The AI agent uses these to generate
-// data ingestion code.
+// fields to destination fields across one or more sources and
+// destinations. The AI agent uses these to generate data ingestion code.
 package transform
 
-// Contract describes how to transform data from a source to a destination.
+// Contract describes how to transform data from one or more sources
+// to one or more destinations. Each destination schema gets its own
+// MappingGroup with field-level mappings.
 type Contract struct {
-	ContractType   string         `json:"contract_type"`
-	TransformID    string         `json:"transformation_id"`
-	SourceRef      string         `json:"source_ref"`
+	ContractType    string         `json:"contract_type"`
+	TransformID     string         `json:"transformation_id"`
+	SourceRefs      []string       `json:"source_refs"`
+	DestinationRefs []string       `json:"destination_refs"`
+	MappingGroups   []MappingGroup `json:"mapping_groups"`
+	ExecutionPlan   ExecutionPlan  `json:"execution_plan"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+}
+
+// MappingGroup holds field mappings for a single destination schema.
+type MappingGroup struct {
 	DestinationRef string         `json:"destination_ref"`
 	FieldMappings  []FieldMapping `json:"field_mappings"`
-	ExecutionPlan  ExecutionPlan  `json:"execution_plan"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
 }
 
 // FieldMapping maps a single destination field to a source, which can be
-// a source field, an explicit null, or a constant value.
+// a source field (qualified by SourceRef), an explicit null, a constant
+// value, or a transform computed from multiple source fields.
 type FieldMapping struct {
 	DestinationField string               `json:"destination_field"`
 	SourceType       SourceType           `json:"source_type"`
+	SourceRef        string               `json:"source_ref,omitempty"`
 	SourceField      string               `json:"source_field,omitempty"`
 	SourceConstant   string               `json:"source_constant,omitempty"`
 	Transformation   *FieldTransformation `json:"transformation,omitempty"`
@@ -39,9 +49,10 @@ const (
 	// SourceTypeNull sets the destination field to null.
 	SourceTypeNull SourceType = "null"
 	// SourceTypeConstant sets the destination field to a constant value.
-	// SuggestMappings never generates this — it is set by the user or
-	// AI agent when a fixed value is desired.
 	SourceTypeConstant SourceType = "constant"
+	// SourceTypeTransform computes the destination field from one or more
+	// source fields with a free-text description of the transformation.
+	SourceTypeTransform SourceType = "transform"
 )
 
 // FieldTransformation describes how to convert a source value to fit
