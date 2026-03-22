@@ -71,8 +71,10 @@ func TestSuggestMappingsExactMatch(t *testing.T) {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
 
-	// name -> name (exact match, same type)
 	m0 := mappings[0]
+	if m0.SourceType != SourceTypeField {
+		t.Errorf("mapping[0] source_type = %q, want field", m0.SourceType)
+	}
 	if m0.SourceField != "name" || m0.DestinationField != "name" {
 		t.Errorf("mapping[0] = %s -> %s, want name -> name", m0.SourceField, m0.DestinationField)
 	}
@@ -83,8 +85,10 @@ func TestSuggestMappingsExactMatch(t *testing.T) {
 		t.Error("mapping[0] should not have transformation (compatible types)")
 	}
 
-	// age -> age (exact match, needs cast from numeric to integer)
 	m1 := mappings[1]
+	if m1.SourceType != SourceTypeField {
+		t.Errorf("mapping[1] source_type = %q, want field", m1.SourceType)
+	}
 	if m1.SourceField != "age" || m1.DestinationField != "age" {
 		t.Errorf("mapping[1] = %s -> %s, want age -> age", m1.SourceField, m1.DestinationField)
 	}
@@ -173,22 +177,32 @@ func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
 	}
 }
 
-func TestSuggestMappingsNoMatch(t *testing.T) {
+func TestSuggestMappingsNoMatch_Nullable(t *testing.T) {
 	src := []SourceField{{Name: "foo", DataType: "text"}}
-	dst := []DestinationField{{Name: "bar", DataType: "text"}}
+	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: true}}
 
 	mappings := SuggestMappings(src, dst)
 	if len(mappings) != 1 {
-		t.Fatalf("mappings = %d, want 1 (one per destination field)", len(mappings))
+		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
-	if mappings[0].DestinationField != "bar" {
-		t.Errorf("destination_field = %q, want bar", mappings[0].DestinationField)
+	if mappings[0].SourceType != SourceTypeNull {
+		t.Errorf("source_type = %q, want null (nullable + unmatched)", mappings[0].SourceType)
 	}
 	if mappings[0].SourceField != "" {
-		t.Errorf("source_field = %q, want empty (no match)", mappings[0].SourceField)
+		t.Errorf("source_field = %q, want empty", mappings[0].SourceField)
 	}
-	if mappings[0].Confidence != 0 {
-		t.Errorf("confidence = %f, want 0 (no match)", mappings[0].Confidence)
+}
+
+func TestSuggestMappingsNoMatch_NonNullable(t *testing.T) {
+	src := []SourceField{{Name: "foo", DataType: "text"}}
+	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: false}}
+
+	mappings := SuggestMappings(src, dst)
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %d, want 1", len(mappings))
+	}
+	if mappings[0].SourceType != SourceTypeUnmapped {
+		t.Errorf("source_type = %q, want unmapped (non-nullable + unmatched = user must decide)", mappings[0].SourceType)
 	}
 }
 
@@ -245,11 +259,16 @@ func TestNeedsCast(t *testing.T) {
 		{"text", "text", false},
 		{"text", "varchar", false},
 		{"text", "char", false},
+		{"varchar", "text", false}, // bidirectional
+		{"char", "varchar", false}, // bidirectional
 		{"numeric", "integer", false},
 		{"numeric", "bigint", false},
 		{"numeric", "real", false},
+		{"integer", "numeric", false}, // bidirectional
+		{"bigint", "integer", false},  // bidirectional
 		{"date", "timestamp", false},
 		{"date", "timestamptz", false},
+		{"timestamp", "date", false}, // bidirectional
 		{"boolean", "boolean", false},
 		{"text", "boolean", true},
 		{"text", "integer", true},
