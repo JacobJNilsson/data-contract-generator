@@ -39,6 +39,13 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      - name: Test profile (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./profile/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "profile: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
       - name: Test csvcontract (100%)
         run: |
           go test -race -coverprofile=coverage.out ./csvcontract/...

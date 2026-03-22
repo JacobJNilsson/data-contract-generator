@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/JacobJNilsson/data-contract-generator/profile"
 )
 
 // AnalyzeFile opens a CSV file and produces a SourceContract describing
@@ -121,7 +123,7 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		return nil, fmt.Errorf("file is empty")
 	}
 
-	hasHeader := detectHeader(firstRow)
+	hasHeader := profile.DetectHeader(firstRow)
 
 	var fieldNames []string
 	maxSampleRows := opts.maxSampleRows()
@@ -140,7 +142,7 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		}
 	} else {
 		if len(firstRow) > 0 {
-			fieldNames = generateFieldNames(len(firstRow))
+			fieldNames = profile.GenerateFieldNames(len(firstRow))
 		}
 		firstDataRow = firstRow
 	}
@@ -148,11 +150,11 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 	numFields := len(fieldNames)
 
 	// Initialize per-column profilers and type trackers.
-	profilers := make([]*columnProfiler, numFields)
-	colTypes := make([]DataType, numFields)
+	profilers := make([]*profile.ColumnProfiler, numFields)
+	colTypes := make([]profile.DataType, numFields)
 	for i := range profilers {
-		profilers[i] = newColumnProfiler(maxTracked)
-		colTypes[i] = TypeEmpty
+		profilers[i] = profile.NewColumnProfiler(maxTracked)
+		colTypes[i] = profile.TypeEmpty
 	}
 
 	// If the first row is data, process it.
@@ -193,7 +195,7 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		fields[i] = Field{
 			Name:     name,
 			DataType: colTypes[i],
-			Profile:  profilers[i].finish(topN),
+			Profile:  profilers[i].Finish(topN),
 		}
 	}
 
@@ -206,14 +208,14 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 }
 
 // observeRow feeds a single row to per-column profilers and type trackers.
-func observeRow(row []string, profilers []*columnProfiler, colTypes []DataType, numFields int) {
+func observeRow(row []string, profilers []*profile.ColumnProfiler, colTypes []profile.DataType, numFields int) {
 	for col := 0; col < numFields; col++ {
 		var value string
 		if col < len(row) {
 			value = row[col]
 		}
-		profilers[col].observe(value)
-		cellType := classifyCell(value)
-		colTypes[col] = mergeTypes(colTypes[col], cellType)
+		profilers[col].Observe(value)
+		cellType := profile.ClassifyCell(value)
+		colTypes[col] = profile.MergeTypes(colTypes[col], cellType)
 	}
 }

@@ -1,10 +1,10 @@
-package csvcontract
+package profile
 
 import "testing"
 
 func TestColumnProfilerEmpty(t *testing.T) {
-	p := newColumnProfiler(100)
-	result := p.finish(10)
+	p := NewColumnProfiler(100)
+	result := p.Finish(10)
 	if result.TotalCount != 0 || result.NullCount != 0 {
 		t.Errorf("expected zero profile, got %+v", result)
 	}
@@ -14,11 +14,11 @@ func TestColumnProfilerEmpty(t *testing.T) {
 }
 
 func TestColumnProfilerAllNulls(t *testing.T) {
-	p := newColumnProfiler(100)
+	p := NewColumnProfiler(100)
 	for _, v := range []string{"", "  ", ""} {
-		p.observe(v)
+		p.Observe(v)
 	}
-	result := p.finish(10)
+	result := p.Finish(10)
 	if result.NullCount != 3 {
 		t.Errorf("null_count = %d, want 3", result.NullCount)
 	}
@@ -34,11 +34,11 @@ func TestColumnProfilerAllNulls(t *testing.T) {
 }
 
 func TestColumnProfilerNumeric(t *testing.T) {
-	p := newColumnProfiler(100)
+	p := NewColumnProfiler(100)
 	for _, v := range []string{"10", "5", "20", "5"} {
-		p.observe(v)
+		p.Observe(v)
 	}
-	result := p.finish(10)
+	result := p.Finish(10)
 	if result.MinValue == nil || *result.MinValue != "5" {
 		t.Errorf("min_value = %v, want 5", result.MinValue)
 	}
@@ -55,11 +55,11 @@ func TestColumnProfilerNumeric(t *testing.T) {
 }
 
 func TestColumnProfilerText(t *testing.T) {
-	p := newColumnProfiler(100)
+	p := NewColumnProfiler(100)
 	for _, v := range []string{"banana", "apple", "cherry"} {
-		p.observe(v)
+		p.Observe(v)
 	}
-	result := p.finish(10)
+	result := p.Finish(10)
 	if result.MinValue == nil || *result.MinValue != "apple" {
 		t.Errorf("min_value = %v, want apple", result.MinValue)
 	}
@@ -69,23 +69,23 @@ func TestColumnProfilerText(t *testing.T) {
 }
 
 func TestColumnProfilerTopNLimit(t *testing.T) {
-	p := newColumnProfiler(100)
+	p := NewColumnProfiler(100)
 	for _, v := range []string{"a", "b", "c", "d", "e", "f"} {
-		p.observe(v)
+		p.Observe(v)
 	}
-	result := p.finish(3)
+	result := p.Finish(3)
 	if len(result.TopValues) != 3 {
 		t.Errorf("top_values count = %d, want 3", len(result.TopValues))
 	}
 }
 
 func TestColumnProfilerTopNSortOrder(t *testing.T) {
-	p := newColumnProfiler(100)
+	p := NewColumnProfiler(100)
 	// "b" appears 3 times, "a" appears 2 times, "c" appears 1 time.
 	for _, v := range []string{"b", "a", "b", "c", "a", "b"} {
-		p.observe(v)
+		p.Observe(v)
 	}
-	result := p.finish(10)
+	result := p.Finish(10)
 	if len(result.TopValues) != 3 {
 		t.Fatalf("top_values count = %d, want 3", len(result.TopValues))
 	}
@@ -101,24 +101,17 @@ func TestColumnProfilerTopNSortOrder(t *testing.T) {
 	}
 }
 
-func TestOptionsMaxTracked(t *testing.T) {
-	opts := &Options{MaxTracked: 42}
-	if opts.maxTracked() != 42 {
-		t.Errorf("maxTracked() = %d, want 42", opts.maxTracked())
-	}
-}
-
 func TestColumnProfilerCapped(t *testing.T) {
 	// With maxTracked=3, only 3 distinct values are tracked.
 	// The 4th distinct value is ignored, but existing counters keep working.
-	p := newColumnProfiler(3)
-	p.observe("a")
-	p.observe("b")
-	p.observe("c")
-	p.observe("d") // ignored -- cap reached
-	p.observe("a") // "a" counter still increments
+	p := NewColumnProfiler(3)
+	p.Observe("a")
+	p.Observe("b")
+	p.Observe("c")
+	p.Observe("d") // ignored -- cap reached
+	p.Observe("a") // "a" counter still increments
 
-	result := p.finish(10)
+	result := p.Finish(10)
 	if result.TotalCount != 5 {
 		t.Errorf("total_count = %d, want 5", result.TotalCount)
 	}
@@ -137,11 +130,11 @@ func TestColumnProfilerCapped(t *testing.T) {
 }
 
 func TestColumnProfilerTotalCount(t *testing.T) {
-	p := newColumnProfiler(100)
-	p.observe("x")
-	p.observe("")
-	p.observe("y")
-	result := p.finish(10)
+	p := NewColumnProfiler(100)
+	p.Observe("x")
+	p.Observe("")
+	p.Observe("y")
+	result := p.Finish(10)
 	if result.TotalCount != 3 {
 		t.Errorf("total_count = %d, want 3", result.TotalCount)
 	}
@@ -162,73 +155,73 @@ func TestIsNull(t *testing.T) {
 		{" x ", false},
 	}
 	for _, tt := range tests {
-		got := isNull(tt.input)
+		got := IsNull(tt.input)
 		if got != tt.want {
-			t.Errorf("isNull(%q) = %v, want %v", tt.input, got, tt.want)
+			t.Errorf("IsNull(%q) = %v, want %v", tt.input, got, tt.want)
 		}
 	}
 }
 
 func TestRangeTrackerEmpty(t *testing.T) {
-	var tracker rangeTracker
-	if tracker.seen {
+	var tracker RangeTracker
+	if tracker.Seen() {
 		t.Error("expected unseen tracker")
 	}
 }
 
 func TestRangeTrackerNumeric(t *testing.T) {
-	var tracker rangeTracker
+	var tracker RangeTracker
 	for _, v := range []string{"10", "5", "20"} {
-		tracker.observe(v)
+		tracker.Observe(v)
 	}
-	if tracker.min() != "5" {
-		t.Errorf("min = %q, want 5", tracker.min())
+	if tracker.Min() != "5" {
+		t.Errorf("min = %q, want 5", tracker.Min())
 	}
-	if tracker.max() != "20" {
-		t.Errorf("max = %q, want 20", tracker.max())
+	if tracker.Max() != "20" {
+		t.Errorf("max = %q, want 20", tracker.Max())
 	}
 }
 
 func TestRangeTrackerText(t *testing.T) {
-	var tracker rangeTracker
+	var tracker RangeTracker
 	for _, v := range []string{"banana", "apple", "cherry"} {
-		tracker.observe(v)
+		tracker.Observe(v)
 	}
-	if tracker.min() != "apple" {
-		t.Errorf("min = %q, want apple", tracker.min())
+	if tracker.Min() != "apple" {
+		t.Errorf("min = %q, want apple", tracker.Min())
 	}
-	if tracker.max() != "cherry" {
-		t.Errorf("max = %q, want cherry", tracker.max())
+	if tracker.Max() != "cherry" {
+		t.Errorf("max = %q, want cherry", tracker.Max())
 	}
 }
 
 func TestRangeTrackerMixed(t *testing.T) {
-	var tracker rangeTracker
-	tracker.observe("9")
-	tracker.observe("10")
-	tracker.observe("100")
-	tracker.observe("abc")
-	tracker.observe("5")
+	var tracker RangeTracker
+	tracker.Observe("9")
+	tracker.Observe("10")
+	tracker.Observe("100")
+	tracker.Observe("abc")
+	tracker.Observe("5")
 
-	if tracker.min() != "10" {
-		t.Errorf("min = %q, want \"10\" (lexicographic after switch)", tracker.min())
+	if tracker.Min() != "10" {
+		t.Errorf("min = %q, want \"10\" (lexicographic after switch)", tracker.Min())
 	}
-	if tracker.max() != "abc" {
-		t.Errorf("max = %q, want \"abc\"", tracker.max())
+	if tracker.Max() != "abc" {
+		t.Errorf("max = %q, want \"abc\"", tracker.Max())
 	}
 }
 
 func TestRangeTrackerNumericToLexSwap(t *testing.T) {
-	var tracker rangeTracker
-	tracker.observe("9")
-	tracker.observe("2")
-	tracker.observe("hello")
+	var tracker RangeTracker
+	tracker.Observe("9")
+	tracker.Observe("2")
+	tracker.Observe("hello")
 
-	if tracker.min() != "2" {
-		t.Errorf("min = %q, want \"2\"", tracker.min())
+	if tracker.Min() != "2" {
+		t.Errorf("min = %q, want \"2\"", tracker.Min())
 	}
-	if tracker.max() != "hello" {
-		t.Errorf("max = %q, want \"hello\"", tracker.max())
+	if tracker.Max() != "hello" {
+		t.Errorf("max = %q, want \"hello\"", tracker.Max())
 	}
 }
 
@@ -254,13 +247,37 @@ func TestParseNumeric(t *testing.T) {
 		{"-", 0, false},
 	}
 	for _, tt := range tests {
-		got, ok := parseNumeric(tt.input)
+		got, ok := ParseNumeric(tt.input)
 		if ok != tt.ok {
-			t.Errorf("parseNumeric(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			t.Errorf("ParseNumeric(%q) ok = %v, want %v", tt.input, ok, tt.ok)
 			continue
 		}
 		if ok && got != tt.want {
-			t.Errorf("parseNumeric(%q) = %f, want %f", tt.input, got, tt.want)
+			t.Errorf("ParseNumeric(%q) = %f, want %f", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestOptionsDefaults(t *testing.T) {
+	var nilOpts *Options
+	if nilOpts.GetTopN() != 5 {
+		t.Errorf("nil GetTopN() = %d, want 5", nilOpts.GetTopN())
+	}
+	if nilOpts.GetMaxTracked() != 10000 {
+		t.Errorf("nil GetMaxTracked() = %d, want 10000", nilOpts.GetMaxTracked())
+	}
+	if nilOpts.GetMaxSampleRows() != 5 {
+		t.Errorf("nil GetMaxSampleRows() = %d, want 5", nilOpts.GetMaxSampleRows())
+	}
+
+	opts := &Options{TopN: 42, MaxTracked: 100, MaxSampleRows: 10}
+	if opts.GetTopN() != 42 {
+		t.Errorf("GetTopN() = %d, want 42", opts.GetTopN())
+	}
+	if opts.GetMaxTracked() != 100 {
+		t.Errorf("GetMaxTracked() = %d, want 100", opts.GetMaxTracked())
+	}
+	if opts.GetMaxSampleRows() != 10 {
+		t.Errorf("GetMaxSampleRows() = %d, want 10", opts.GetMaxSampleRows())
 	}
 }
