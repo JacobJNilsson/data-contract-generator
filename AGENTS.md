@@ -34,6 +34,10 @@ verify/          <- contract validation
 transform/       <- field mapping suggestions
 ```
 
+## Cross-Repo Testing
+
+When a feature spans multiple repos (library → API → frontend), unit tests in each repo are not sufficient. Write a Playwright e2e test in `data-ingestion-web/e2e/` that tests the real user workflow against a local API server. See `data-ingestion-web/AGENTS.md` for details.
+
 ## Before You Finish
 
 ```bash
