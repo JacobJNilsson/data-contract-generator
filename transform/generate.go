@@ -63,24 +63,25 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []Fie
 	}
 
 	// Build a flat list of source fields with their ref, for matching.
+	// Source fields are NOT consumed on match -- multiple destination fields
+	// can independently match the same source field (which is correct for
+	// multi-schema sources where the same field name appears in different
+	// schemas, and also for cases where multiple destination fields need
+	// the same source value).
 	type qualifiedField struct {
 		ref   string
 		field SourceField
-		used  bool
 	}
-	var allFields []*qualifiedField
+	var allFields []qualifiedField
 	for _, src := range sources {
 		for _, f := range src.Fields {
-			allFields = append(allFields, &qualifiedField{ref: src.Ref, field: f})
+			allFields = append(allFields, qualifiedField{ref: src.Ref, field: f})
 		}
 	}
 
 	// Pass 1: exact name match (case-insensitive).
 	for i, df := range dest {
 		for _, qf := range allFields {
-			if qf.used {
-				continue
-			}
 			if strings.EqualFold(df.Name, qf.field.Name) {
 				mappings[i].SourceType = SourceTypeField
 				mappings[i].SourceRef = qf.ref
@@ -93,7 +94,6 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []Fie
 					}
 					mappings[i].Confidence = 0.9
 				}
-				qf.used = true
 				break
 			}
 		}
@@ -106,9 +106,6 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []Fie
 		}
 		normDst := normalize(df.Name)
 		for _, qf := range allFields {
-			if qf.used {
-				continue
-			}
 			if normDst == normalize(qf.field.Name) {
 				mappings[i].SourceType = SourceTypeField
 				mappings[i].SourceRef = qf.ref
@@ -123,7 +120,6 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []Fie
 					Type:       TypeRename,
 					Parameters: params,
 				}
-				qf.used = true
 				break
 			}
 		}
