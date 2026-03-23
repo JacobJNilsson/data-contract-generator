@@ -541,6 +541,68 @@ func TestSuggestMappingsDestRefMixedSources(t *testing.T) {
 	}
 }
 
+func TestSuggestMappingsOverlapScoring(t *testing.T) {
+	// The real Petstore scenario: destRef is "Swagger Petstore.POST /user"
+	// which does NOT match any source ref. The overlap-scoring heuristic
+	// should still prefer "GET /user/{username}" (8/8 field overlap) over
+	// "GET /pet/{petId}" (2/8 overlap: id, status).
+	sources := []NamedSourceFields{
+		{Ref: "Swagger Petstore.GET /pet/{petId}", Fields: []SourceField{
+			{Name: "category", DataType: "jsonb"},
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+			{Name: "photoUrls", DataType: "array[text]"},
+			{Name: "status", DataType: "text"},
+			{Name: "tags", DataType: "array[text]"},
+		}},
+		{Ref: "Swagger Petstore.GET /store/order/{orderId}", Fields: []SourceField{
+			{Name: "complete", DataType: "boolean"},
+			{Name: "id", DataType: "integer"},
+			{Name: "petId", DataType: "integer"},
+			{Name: "quantity", DataType: "integer"},
+			{Name: "shipDate", DataType: "timestamptz"},
+			{Name: "status", DataType: "text"},
+		}},
+		{Ref: "Swagger Petstore.GET /user/{username}", Fields: []SourceField{
+			{Name: "email", DataType: "text"},
+			{Name: "firstName", DataType: "text"},
+			{Name: "id", DataType: "integer"},
+			{Name: "lastName", DataType: "text"},
+			{Name: "password", DataType: "text"},
+			{Name: "phone", DataType: "text"},
+			{Name: "userStatus", DataType: "integer"},
+			{Name: "username", DataType: "text"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "email", DataType: "text", Nullable: true},
+		{Name: "firstName", DataType: "text", Nullable: true},
+		{Name: "id", DataType: "integer", Nullable: true},
+		{Name: "lastName", DataType: "text", Nullable: true},
+		{Name: "password", DataType: "text", Nullable: true},
+		{Name: "phone", DataType: "text", Nullable: true},
+		{Name: "userStatus", DataType: "integer", Nullable: true},
+		{Name: "username", DataType: "text", Nullable: true},
+	}
+
+	// destRef does NOT match any source -- overlap scoring must work.
+	mappings := SuggestMappings(sources, dst, "Swagger Petstore.POST /user")
+	if len(mappings) != 8 {
+		t.Fatalf("mappings = %d, want 8", len(mappings))
+	}
+
+	for _, m := range mappings {
+		if m.SourceType != SourceTypeField {
+			t.Errorf("field %q: source_type = %q, want field", m.DestinationField, m.SourceType)
+			continue
+		}
+		if m.SourceRef != "Swagger Petstore.GET /user/{username}" {
+			t.Errorf("field %q: source_ref = %q, want Swagger Petstore.GET /user/{username}",
+				m.DestinationField, m.SourceRef)
+		}
+	}
+}
+
 // --- needsCast tests --------------------------------------------------------
 
 func TestNeedsCast(t *testing.T) {

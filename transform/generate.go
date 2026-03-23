@@ -1,6 +1,9 @@
 package transform
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // SourceField represents a field from a source contract (CSV, JSON, etc.).
 type SourceField struct {
@@ -63,28 +66,50 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField, destR
 		}
 	}
 
-	// Build source field lists, separating the preferred source (matching
-	// destRef) from the rest. Fields from the preferred source are checked
-	// first so they win ties on field name.
+	// Score each source by how many destination field names it contains.
+	// The source with the most overlap is most likely the "right" source
+	// for this destination -- its fields are checked first so they win
+	// ties when multiple sources share a field name.
+	//
+	// When destRef matches a source ref exactly, that source gets maximum
+	// score (len(dest)+1) to guarantee it comes first.
+	destFieldSet := make(map[string]bool, len(dest))
+	for _, df := range dest {
+		destFieldSet[strings.ToLower(df.Name)] = true
+	}
+
+	type scoredSource struct {
+		src   NamedSourceFields
+		score int
+	}
+	scored := make([]scoredSource, len(sources))
+	for i, src := range sources {
+		score := 0
+		if src.Ref == destRef {
+			score = len(dest) + 1 // exact ref match: highest priority
+		} else {
+			for _, f := range src.Fields {
+				if destFieldSet[strings.ToLower(f.Name)] {
+					score++
+				}
+			}
+		}
+		scored[i] = scoredSource{src: src, score: score}
+	}
+	slices.SortFunc(scored, func(a, b scoredSource) int {
+		return b.score - a.score // descending
+	})
+
 	type qualifiedField struct {
 		ref   string
 		field SourceField
 	}
-	var preferred, others []qualifiedField
-	for _, src := range sources {
-		for _, f := range src.Fields {
-			qf := qualifiedField{ref: src.Ref, field: f}
-			if src.Ref == destRef {
-				preferred = append(preferred, qf)
-			} else {
-				others = append(others, qf)
-			}
+	allFields := make([]qualifiedField, 0)
+	for _, ss := range scored {
+		for _, f := range ss.src.Fields {
+			allFields = append(allFields, qualifiedField{ref: ss.src.Ref, field: f})
 		}
 	}
-	// Preferred first, then others.
-	allFields := make([]qualifiedField, 0, len(preferred)+len(others))
-	allFields = append(allFields, preferred...)
-	allFields = append(allFields, others...)
 
 	// Pass 1: exact name match (case-insensitive).
 	for i, df := range dest {
