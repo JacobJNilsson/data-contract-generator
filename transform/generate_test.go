@@ -84,7 +84,7 @@ func TestSuggestMappingsExactMatch(t *testing.T) {
 		{Name: "age", DataType: "integer"},
 	}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
@@ -124,7 +124,7 @@ func TestSuggestMappingsCaseInsensitive(t *testing.T) {
 	src := []SourceField{{Name: "Name", DataType: "text"}}
 	dst := []DestinationField{{Name: "name", DataType: "text"}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -137,7 +137,7 @@ func TestSuggestMappingsNormalizedMatch(t *testing.T) {
 	src := []SourceField{{Name: "first_name", DataType: "text"}}
 	dst := []DestinationField{{Name: "firstname", DataType: "varchar"}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -156,7 +156,7 @@ func TestSuggestMappingsNormalizedWithCast(t *testing.T) {
 	src := []SourceField{{Name: "created-at", DataType: "text"}}
 	dst := []DestinationField{{Name: "created_at", DataType: "timestamptz"}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -175,7 +175,7 @@ func TestSuggestMappingsSkipsAlreadyMatched(t *testing.T) {
 		{Name: "userid", DataType: "integer"},
 	}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
@@ -199,7 +199,7 @@ func TestSuggestMappingsNoMatch_Nullable(t *testing.T) {
 	src := []SourceField{{Name: "foo", DataType: "text"}}
 	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: true}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -215,7 +215,7 @@ func TestSuggestMappingsNoMatch_NonNullable(t *testing.T) {
 	src := []SourceField{{Name: "foo", DataType: "text"}}
 	dst := []DestinationField{{Name: "bar", DataType: "text", Nullable: false}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -225,7 +225,7 @@ func TestSuggestMappingsNoMatch_NonNullable(t *testing.T) {
 }
 
 func TestSuggestMappingsEmpty(t *testing.T) {
-	mappings := SuggestMappings(nil, nil)
+	mappings := SuggestMappings(nil, nil, "")
 	if len(mappings) != 0 {
 		t.Errorf("mappings = %d, want 0", len(mappings))
 	}
@@ -237,7 +237,7 @@ func TestSuggestMappingsExactTakesPriority(t *testing.T) {
 		{Name: "email", DataType: "varchar"},
 	}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -250,7 +250,7 @@ func TestSuggestMappingsNeedsCast(t *testing.T) {
 	src := []SourceField{{Name: "active", DataType: "text"}}
 	dst := []DestinationField{{Name: "active", DataType: "boolean"}}
 
-	mappings := SuggestMappings(singleSource(src), dst)
+	mappings := SuggestMappings(singleSource(src), dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -287,7 +287,7 @@ func TestSuggestMappingsMultiSource(t *testing.T) {
 		{Name: "email", DataType: "varchar"},
 	}
 
-	mappings := SuggestMappings(sources, dst)
+	mappings := SuggestMappings(sources, dst, "")
 	if len(mappings) != 4 {
 		t.Fatalf("mappings = %d, want 4", len(mappings))
 	}
@@ -321,7 +321,7 @@ func TestSuggestMappingsMultiSourceFirstWins(t *testing.T) {
 	}
 	dst := []DestinationField{{Name: "id", DataType: "integer"}}
 
-	mappings := SuggestMappings(sources, dst)
+	mappings := SuggestMappings(sources, dst, "")
 	if len(mappings) != 1 {
 		t.Fatalf("mappings = %d, want 1", len(mappings))
 	}
@@ -341,7 +341,7 @@ func TestSuggestMappingsMultiSourceCrossSourceNormalized(t *testing.T) {
 		{Name: "customername", DataType: "varchar"},
 	}
 
-	mappings := SuggestMappings(sources, dst)
+	mappings := SuggestMappings(sources, dst, "")
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
@@ -376,7 +376,7 @@ func TestSuggestMappingsMultiSourceSameFieldName(t *testing.T) {
 		{Name: "name", DataType: "varchar"},
 	}
 
-	mappings := SuggestMappings(sources, dst)
+	mappings := SuggestMappings(sources, dst, "")
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
@@ -417,7 +417,7 @@ func TestSuggestMappingsMultiSourceIndependentMatching(t *testing.T) {
 		{Name: "total", DataType: "numeric"},
 	}
 
-	mappings := SuggestMappings(sources, dst)
+	mappings := SuggestMappings(sources, dst, "")
 	if len(mappings) != 2 {
 		t.Fatalf("mappings = %d, want 2", len(mappings))
 	}
@@ -428,6 +428,116 @@ func TestSuggestMappingsMultiSourceIndependentMatching(t *testing.T) {
 	}
 	if mappings[1].SourceRef != "orders" || mappings[1].SourceField != "total" {
 		t.Errorf("mapping[1] = %s:%s, want orders:total", mappings[1].SourceRef, mappings[1].SourceField)
+	}
+}
+
+func TestSuggestMappingsDestRefPreference(t *testing.T) {
+	// The Petstore scenario: three source endpoints share some field names
+	// (id, status). The destination is the user endpoint. When destRef
+	// matches the user source, all fields should come from it.
+	sources := []NamedSourceFields{
+		{Ref: "Swagger Petstore.GET /pet/{petId}", Fields: []SourceField{
+			{Name: "category", DataType: "jsonb"},
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+			{Name: "photoUrls", DataType: "array[text]"},
+			{Name: "status", DataType: "text"},
+			{Name: "tags", DataType: "array[text]"},
+		}},
+		{Ref: "Swagger Petstore.GET /store/order/{orderId}", Fields: []SourceField{
+			{Name: "complete", DataType: "boolean"},
+			{Name: "id", DataType: "integer"},
+			{Name: "petId", DataType: "integer"},
+			{Name: "quantity", DataType: "integer"},
+			{Name: "shipDate", DataType: "timestamptz"},
+			{Name: "status", DataType: "text"},
+		}},
+		{Ref: "Swagger Petstore.GET /user/{username}", Fields: []SourceField{
+			{Name: "email", DataType: "text"},
+			{Name: "firstName", DataType: "text"},
+			{Name: "id", DataType: "integer"},
+			{Name: "lastName", DataType: "text"},
+			{Name: "password", DataType: "text"},
+			{Name: "phone", DataType: "text"},
+			{Name: "userStatus", DataType: "integer"},
+			{Name: "username", DataType: "text"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "email", DataType: "text", Nullable: true},
+		{Name: "firstName", DataType: "text", Nullable: true},
+		{Name: "id", DataType: "integer", Nullable: true},
+		{Name: "lastName", DataType: "text", Nullable: true},
+		{Name: "password", DataType: "text", Nullable: true},
+		{Name: "phone", DataType: "text", Nullable: true},
+		{Name: "userStatus", DataType: "integer", Nullable: true},
+		{Name: "username", DataType: "text", Nullable: true},
+	}
+
+	mappings := SuggestMappings(sources, dst, "Swagger Petstore.GET /user/{username}")
+	if len(mappings) != 8 {
+		t.Fatalf("mappings = %d, want 8", len(mappings))
+	}
+
+	// ALL fields should come from the user endpoint, including "id"
+	// which also exists in pet and order.
+	for _, m := range mappings {
+		if m.SourceType != SourceTypeField {
+			t.Errorf("field %q: source_type = %q, want field", m.DestinationField, m.SourceType)
+			continue
+		}
+		if m.SourceRef != "Swagger Petstore.GET /user/{username}" {
+			t.Errorf("field %q: source_ref = %q, want Swagger Petstore.GET /user/{username}",
+				m.DestinationField, m.SourceRef)
+		}
+	}
+}
+
+func TestSuggestMappingsDestRefFallback(t *testing.T) {
+	// When destRef doesn't match any source, falls back to first-source-wins.
+	sources := []NamedSourceFields{
+		{Ref: "a", Fields: []SourceField{{Name: "id", DataType: "integer"}}},
+		{Ref: "b", Fields: []SourceField{{Name: "id", DataType: "integer"}}},
+	}
+	dst := []DestinationField{{Name: "id", DataType: "integer"}}
+
+	mappings := SuggestMappings(sources, dst, "nonexistent")
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %d, want 1", len(mappings))
+	}
+	// No preferred source, so "a" wins (first in list).
+	if mappings[0].SourceRef != "a" {
+		t.Errorf("source_ref = %q, want a (first wins when no destRef match)", mappings[0].SourceRef)
+	}
+}
+
+func TestSuggestMappingsDestRefMixedSources(t *testing.T) {
+	// destRef matches source "b". Field "shared" exists in both a and b.
+	// Field "only_a" only in a. The result should prefer b for "shared"
+	// and fall back to a for "only_a".
+	sources := []NamedSourceFields{
+		{Ref: "a", Fields: []SourceField{
+			{Name: "shared", DataType: "text"},
+			{Name: "only_a", DataType: "text"},
+		}},
+		{Ref: "b", Fields: []SourceField{
+			{Name: "shared", DataType: "text"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "shared", DataType: "text"},
+		{Name: "only_a", DataType: "text"},
+	}
+
+	mappings := SuggestMappings(sources, dst, "b")
+	if len(mappings) != 2 {
+		t.Fatalf("mappings = %d, want 2", len(mappings))
+	}
+	if mappings[0].SourceRef != "b" {
+		t.Errorf("shared: source_ref = %q, want b (preferred)", mappings[0].SourceRef)
+	}
+	if mappings[1].SourceRef != "a" {
+		t.Errorf("only_a: source_ref = %q, want a (fallback)", mappings[1].SourceRef)
 	}
 }
 

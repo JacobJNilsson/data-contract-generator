@@ -39,16 +39,17 @@ func New(transformID, sourceRef, destRef string) *Contract {
 }
 
 // SuggestMappings returns a mapping for every destination field, drawing
-// from one or more named source field sets. Each matched mapping includes
-// the SourceRef identifying which source the field comes from.
+// from one or more named source field sets. destRef identifies which
+// destination schema these mappings are for; when a source has a ref
+// matching destRef, its fields are preferred over identically-named
+// fields from other sources.
 //
 // Matching strategy (in priority order):
-//  1. Exact name match (case-insensitive): confidence 1.0
-//  2. Normalized name match (underscores/hyphens removed): confidence 0.8
-//
-// When multiple sources have a field with the same name, the first source
-// in the slice wins.
-func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []FieldMapping {
+//  1. Exact name match from the preferred source (ref == destRef): confidence 1.0
+//  2. Exact name match from any other source: confidence 1.0
+//  3. Normalized name match from preferred source: confidence 0.8
+//  4. Normalized name match from any other source: confidence 0.8
+func SuggestMappings(sources []NamedSourceFields, dest []DestinationField, destRef string) []FieldMapping {
 	mappings := make([]FieldMapping, len(dest))
 	for i, df := range dest {
 		st := SourceTypeNull
@@ -62,22 +63,28 @@ func SuggestMappings(sources []NamedSourceFields, dest []DestinationField) []Fie
 		}
 	}
 
-	// Build a flat list of source fields with their ref, for matching.
-	// Source fields are NOT consumed on match -- multiple destination fields
-	// can independently match the same source field (which is correct for
-	// multi-schema sources where the same field name appears in different
-	// schemas, and also for cases where multiple destination fields need
-	// the same source value).
+	// Build source field lists, separating the preferred source (matching
+	// destRef) from the rest. Fields from the preferred source are checked
+	// first so they win ties on field name.
 	type qualifiedField struct {
 		ref   string
 		field SourceField
 	}
-	var allFields []qualifiedField
+	var preferred, others []qualifiedField
 	for _, src := range sources {
 		for _, f := range src.Fields {
-			allFields = append(allFields, qualifiedField{ref: src.Ref, field: f})
+			qf := qualifiedField{ref: src.Ref, field: f}
+			if src.Ref == destRef {
+				preferred = append(preferred, qf)
+			} else {
+				others = append(others, qf)
+			}
 		}
 	}
+	// Preferred first, then others.
+	allFields := make([]qualifiedField, 0, len(preferred)+len(others))
+	allFields = append(allFields, preferred...)
+	allFields = append(allFields, others...)
 
 	// Pass 1: exact name match (case-insensitive).
 	for i, df := range dest {
