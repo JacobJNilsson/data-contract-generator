@@ -32,6 +32,7 @@ pgcontract/      <- PostgreSQL analysis (real Postgres in tests)
 supacontract/    <- Supabase analysis (via PostgREST OpenAPI)
 verify/          <- contract validation
 transform/       <- field mapping suggestions
+pipeline/        <- multi-step pipeline DAG contracts
 ```
 
 ## Cross-Repo Testing
