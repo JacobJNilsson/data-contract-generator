@@ -357,6 +357,80 @@ func TestSuggestMappingsMultiSourceCrossSourceNormalized(t *testing.T) {
 	}
 }
 
+func TestSuggestMappingsMultiSourceSameFieldName(t *testing.T) {
+	// Both sources have "id" and "name". Two destination fields need "id"
+	// and "name". Without the fix, the first source consumes both fields
+	// and the second destination field can't match.
+	sources := []NamedSourceFields{
+		{Ref: "users", Fields: []SourceField{
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+		}},
+		{Ref: "orders", Fields: []SourceField{
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "id", DataType: "integer"},
+		{Name: "name", DataType: "varchar"},
+	}
+
+	mappings := SuggestMappings(sources, dst)
+	if len(mappings) != 2 {
+		t.Fatalf("mappings = %d, want 2", len(mappings))
+	}
+
+	// Both fields should match (first source wins for both, since iteration
+	// order puts "users" first). The key point: both match, neither is
+	// left unmapped.
+	if mappings[0].SourceType != SourceTypeField {
+		t.Errorf("mapping[0] source_type = %q, want field", mappings[0].SourceType)
+	}
+	if mappings[0].SourceRef != "users" {
+		t.Errorf("mapping[0] source_ref = %q, want users", mappings[0].SourceRef)
+	}
+	if mappings[1].SourceType != SourceTypeField {
+		t.Errorf("mapping[1] source_type = %q, want field", mappings[1].SourceType)
+	}
+	if mappings[1].SourceRef != "users" {
+		t.Errorf("mapping[1] source_ref = %q, want users", mappings[1].SourceRef)
+	}
+}
+
+func TestSuggestMappingsMultiSourceIndependentMatching(t *testing.T) {
+	// The frontend reorders sources to put the matching one first per
+	// destination tab. Simulate: for destination "orders", source "orders"
+	// is listed first. Both "id" fields should match from "orders".
+	sources := []NamedSourceFields{
+		{Ref: "orders", Fields: []SourceField{
+			{Name: "id", DataType: "integer"},
+			{Name: "total", DataType: "numeric"},
+		}},
+		{Ref: "users", Fields: []SourceField{
+			{Name: "id", DataType: "integer"},
+			{Name: "name", DataType: "text"},
+		}},
+	}
+	dst := []DestinationField{
+		{Name: "id", DataType: "integer"},
+		{Name: "total", DataType: "numeric"},
+	}
+
+	mappings := SuggestMappings(sources, dst)
+	if len(mappings) != 2 {
+		t.Fatalf("mappings = %d, want 2", len(mappings))
+	}
+
+	// Both should match from "orders" (listed first).
+	if mappings[0].SourceRef != "orders" || mappings[0].SourceField != "id" {
+		t.Errorf("mapping[0] = %s:%s, want orders:id", mappings[0].SourceRef, mappings[0].SourceField)
+	}
+	if mappings[1].SourceRef != "orders" || mappings[1].SourceField != "total" {
+		t.Errorf("mapping[1] = %s:%s, want orders:total", mappings[1].SourceRef, mappings[1].SourceField)
+	}
+}
+
 // --- needsCast tests --------------------------------------------------------
 
 func TestNeedsCast(t *testing.T) {
