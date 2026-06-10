@@ -5,34 +5,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 )
 
-// CanonicalBytes serializes the object into its canonical JSON form: keys
-// sorted, fields pre-sorted by name, fixed type tokens, UTF-8, no
-// insignificant whitespace, absent values as explicit nulls. Same object ⇒
-// same bytes, with no dependence on map order, locale, or platform.
+// CanonicalBytes serializes the object into its canonical JSON form: keys in
+// fixed (alphabetical) order via struct declaration order, fields pre-sorted
+// by name, fixed type tokens, UTF-8, no insignificant whitespace, absent
+// values as explicit nulls, and no HTML escaping so the byte form is plain
+// RFC 8259 JSON reproducible outside Go. Same object ⇒ same bytes, with no
+// dependence on map order, locale, or platform.
 func (o Object) CanonicalBytes() []byte {
 	var b bytes.Buffer
-	b.WriteString(`{"algo_version":`)
-	writeString(&b, o.AlgoVersion)
-	b.WriteString(`,"fields":[`)
-	for i, f := range o.Fields {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(`{"name":`)
-		writeString(&b, f.Name)
-		b.WriteString(`,"type":`)
-		writeString(&b, string(f.Type))
-		b.WriteByte('}')
-	}
-	b.WriteString(`],"format":`)
-	writeString(&b, string(o.Format))
-	b.WriteString(`,"nesting":null,"parse_profile":`)
-	writeParseProfile(&b, o.ParseProfile)
-	b.WriteByte('}')
-	return b.Bytes()
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	// Encoding a struct of strings, bools, and slices cannot fail.
+	_ = enc.Encode(o)
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
 // Hash returns the cache-key hash: the algorithm version prefixing a SHA-256
@@ -48,6 +35,9 @@ func (o Object) Hash() string {
 // guard, so even a SHA-256 collision cannot silently mis-route a file.
 func Match(a, b Object) bool {
 	if a.AlgoVersion != b.AlgoVersion || a.Format != b.Format {
+		return false
+	}
+	if !bytes.Equal(a.Nesting, b.Nesting) {
 		return false
 	}
 	if !parseProfileEqual(a.ParseProfile, b.ParseProfile) {
@@ -85,37 +75,4 @@ func boolPtrEqual(a, b *bool) bool {
 		return a == b
 	}
 	return *a == *b
-}
-
-func writeParseProfile(b *bytes.Buffer, p *ParseProfile) {
-	if p == nil {
-		b.WriteString("null")
-		return
-	}
-	b.WriteString(`{"delimiter":`)
-	writeStringPtr(b, p.Delimiter)
-	b.WriteString(`,"encoding":`)
-	writeStringPtr(b, p.Encoding)
-	b.WriteString(`,"has_header":`)
-	if p.HasHeader == nil {
-		b.WriteString("null")
-	} else {
-		b.WriteString(strconv.FormatBool(*p.HasHeader))
-	}
-	b.WriteByte('}')
-}
-
-func writeStringPtr(b *bytes.Buffer, s *string) {
-	if s == nil {
-		b.WriteString("null")
-		return
-	}
-	writeString(b, *s)
-}
-
-// writeString writes a JSON string literal. encoding/json string encoding is
-// deterministic, and a plain string value cannot fail to marshal.
-func writeString(b *bytes.Buffer, s string) {
-	encoded, _ := json.Marshal(s)
-	b.Write(encoded)
 }

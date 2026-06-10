@@ -7,9 +7,11 @@
 package fingerprint
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/JacobJNilsson/data-contract-generator/contract"
@@ -36,7 +38,15 @@ const (
 	TypeTemporal CanonicalType = "TEMPORAL"
 	TypeBoolean  CanonicalType = "BOOLEAN"
 	TypeObject   CanonicalType = "OBJECT"
-	TypeArray    CanonicalType = "ARRAY"
+	// TypeBinary marks declared binary payloads (OpenAPI byte/binary). Binary
+	// vs text changes how bytes become records, so it never collapses into
+	// STRING.
+	TypeBinary CanonicalType = "BINARY"
+	// TypeArray is the element-opaque array token, used when the analyzer
+	// does not expose the element type (JSON sources). When it does (API
+	// specs), the element is preserved as ARRAY<inner>, e.g. ARRAY<NUMBER>:
+	// identity is as fine as the analyzer exposes, never coarser.
+	TypeArray CanonicalType = "ARRAY"
 	// TypeUnknown marks columns whose type could not be observed (all-null or
 	// empty). When a later file resolves the type, the hash changes: a
 	// documented cache miss, not a silent re-route.
@@ -77,11 +87,19 @@ type Field struct {
 // into identity and nothing that does not. Hash() derives the cache-key hash
 // from its canonical serialization; the object itself is stored beside the
 // hash as the collision guard.
+//
+// Struct fields are declared in canonical (alphabetical JSON key) order:
+// CanonicalBytes serializes them in declaration order, and the golden test
+// pins the resulting byte layout.
 type Object struct {
-	AlgoVersion  string        `json:"algo_version"`
-	Format       Format        `json:"format"`
-	ParseProfile *ParseProfile `json:"parse_profile"`
-	Fields       []Field       `json:"fields"`
+	AlgoVersion string  `json:"algo_version"`
+	Fields      []Field `json:"fields"`
+	Format      Format  `json:"format"`
+	// Nesting carries recursive structure when a future analyzer exposes it
+	// (spec limitation L1). Always null under fp1; present so the stored
+	// collision-guard object represents every key the hash covers.
+	Nesting      json.RawMessage `json:"nesting"`
+	ParseProfile *ParseProfile   `json:"parse_profile"`
 }
 
 // Unit is one structural unit of a multi-schema source: the schema locator
@@ -144,27 +162,37 @@ func FromJSON(sc *jsoncontract.SourceContract) (Object, error) {
 	}, nil
 }
 
+// SkippedSchema records one schema of a multi-schema contract that could not
+// be fingerprinted, so a single bad sheet or endpoint never costs the other
+// units their cache identity (per-unit blast-radius isolation).
+type SkippedSchema struct {
+	Locator string
+	Err     error
+}
+
 // FromDataContract fans a multi-schema contract (Excel workbook, API spec)
 // out into one structural unit per schema, each fingerprinted independently.
-// The schema name becomes the unit's channel-path locator.
-func FromDataContract(dc *contract.DataContract) ([]Unit, error) {
+// The schema name becomes the unit's channel-path locator. Schemas that fail
+// to fingerprint are returned in skipped rather than failing the fanout; the
+// error is reserved for contract-level problems.
+func FromDataContract(dc *contract.DataContract) (units []Unit, skipped []SkippedSchema, err error) {
 	if dc == nil {
-		return nil, errors.New("fingerprint: nil data contract")
+		return nil, nil, errors.New("fingerprint: nil data contract")
 	}
 	format, err := dataContractFormat(dc)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(dc.Schemas) == 0 {
-		return nil, errors.New("fingerprint: data contract has no schemas")
+		return nil, nil, errors.New("fingerprint: data contract has no schemas")
 	}
-	units := make([]Unit, 0, len(dc.Schemas))
 	for _, schema := range dc.Schemas {
-		fields, err := canonicalFields(len(schema.Fields), func(i int) (string, string) {
+		fields, fieldErr := canonicalFields(len(schema.Fields), func(i int) (string, string) {
 			return schema.Fields[i].Name, schema.Fields[i].DataType
 		})
-		if err != nil {
-			return nil, fmt.Errorf("schema %q: %w", schema.Name, err)
+		if fieldErr != nil {
+			skipped = append(skipped, SkippedSchema{Locator: schema.Name, Err: fieldErr})
+			continue
 		}
 		units = append(units, Unit{
 			Locator: schema.Name,
@@ -175,13 +203,22 @@ func FromDataContract(dc *contract.DataContract) ([]Unit, error) {
 			},
 		})
 	}
-	return units, nil
+	return units, skipped, nil
 }
 
 // dataContractFormat determines the source format kind from contract
 // metadata. Unrecognized contracts are an error, never a guess: an unknown
 // format must not silently share identity space with a known one.
+//
+// Identity limitation, mirroring spec L1: Excel header detection is per
+// sheet and not exposed on the contract, so a sheet whose literal header row
+// happens to equal the synthesized positional names of a headerless sheet
+// would collide. Resolving it needs the analyzer to expose the detection
+// outcome — a future algo_version, flagged rather than hidden.
 func dataContractFormat(dc *contract.DataContract) (Format, error) {
+	if dc.ContractType == "destination" {
+		return "", errors.New("fingerprint: destination contracts are not fingerprinted")
+	}
 	if sf, ok := dc.Metadata["source_format"].(string); ok && sf == "xlsx" {
 		return FormatXLSX, nil
 	}
@@ -191,10 +228,10 @@ func dataContractFormat(dc *contract.DataContract) (Format, error) {
 	return "", errors.New("fingerprint: cannot determine source format from data contract metadata")
 }
 
-// canonicalFields normalizes, maps, and sorts a schema's fields into
-// canonical form. Named fields sort by name so column reordering does not
-// change identity; headerless CSV columns carry synthesized positional
-// names, which keeps their order intrinsic to identity.
+// canonicalFields normalizes, maps, disambiguates, and sorts a schema's
+// fields into canonical form. Named fields sort by name so column reordering
+// does not change identity; headerless CSV columns carry synthesized
+// positional names, which keeps their order intrinsic to identity.
 func canonicalFields(n int, at func(i int) (name, dataType string)) ([]Field, error) {
 	if n == 0 {
 		return nil, errors.New("fingerprint: schema has no fields")
@@ -208,30 +245,63 @@ func canonicalFields(n int, at func(i int) (name, dataType string)) ([]Field, er
 		}
 		fields = append(fields, Field{Name: canonicalName(name), Type: canonical})
 	}
-	sort.SliceStable(fields, func(i, j int) bool {
-		if fields[i].Name != fields[j].Name {
-			return fields[i].Name < fields[j].Name
-		}
-		return fields[i].Type < fields[j].Type
+	disambiguateDuplicates(fields)
+	// Names are unique after disambiguation, so name order is total.
+	sort.Slice(fields, func(i, j int) bool {
+		return fields[i].Name < fields[j].Name
 	})
 	return fields, nil
 }
 
-// canonicalName normalizes a field name for identity: Unicode NFC plus
-// surrounding-whitespace trim, case preserved. Anything beyond that (a
-// rename) is a real structural change and must miss.
+// disambiguateDuplicates makes canonical names unique by suffixing duplicate
+// occurrences with their column-order ordinal ("id" → "id#1", "id#2").
+// Without this, sorting would erase which duplicate-named column carries
+// which type, letting two files with swapped column types share a
+// fingerprint — a catastrophic false positive. Ambiguous names degrade to
+// positional identity instead, so reordering duplicate-named columns is a
+// miss, exactly like headerless CSV. canonicalName escapes literal '#' as
+// '##' in every name, so a real header can never collide with a synthesized
+// suffix.
+func disambiguateDuplicates(fields []Field) {
+	counts := make(map[string]int, len(fields))
+	for _, f := range fields {
+		counts[f.Name]++
+	}
+	seen := make(map[string]int, len(fields))
+	for i, f := range fields {
+		if counts[f.Name] < 2 {
+			continue
+		}
+		seen[f.Name]++
+		fields[i].Name = f.Name + "#" + strconv.Itoa(seen[f.Name])
+	}
+}
+
+// canonicalName normalizes a field name for identity: invalid UTF-8 replaced
+// deterministically, Unicode NFC, surrounding-whitespace trim, case
+// preserved, and literal '#' escaped as '##' to keep the namespace of
+// disambiguation suffixes private. The UTF-8 replacement keeps the stored
+// object consistent with its serialized form, so encoding garbage cannot
+// manufacture hash-equal-but-object-unequal collision alerts. Anything
+// beyond that (a rename) is a real structural change and must miss.
 func canonicalName(name string) string {
-	return norm.NFC.String(strings.TrimSpace(name))
+	canonical := norm.NFC.String(strings.TrimSpace(strings.ToValidUTF8(name, "�")))
+	return strings.ReplaceAll(canonical, "#", "##")
 }
 
 // mapDataType projects an analyzer type token onto the canonical lattice.
-// The mapping is strict: a token outside the known analyzer vocabularies is
-// an error, because silently coercing it could let two different shapes
-// share a fingerprint.
+// The mapping is strict in both directions: a token outside the known
+// analyzer vocabularies is an error (silent coercion could let two shapes
+// share a fingerprint), and a distinction the analyzer exposes is preserved
+// (array element types, binary vs text) rather than coarsened. Only the
+// spec's deliberate collapses apply: int/float to NUMBER, date/timestamp to
+// TEMPORAL, uuid to STRING, jsonb to OBJECT.
 func mapDataType(dataType string) (CanonicalType, error) {
 	switch dataType {
-	case "text", "uuid", "bytea":
+	case "text", "uuid":
 		return TypeString, nil
+	case "bytea":
+		return TypeBinary, nil
 	case "numeric", "integer":
 		return TypeNumber, nil
 	case "date", "timestamptz":
@@ -245,8 +315,12 @@ func mapDataType(dataType string) (CanonicalType, error) {
 	case "null", "empty":
 		return TypeUnknown, nil
 	}
-	if strings.HasPrefix(dataType, "array[") && strings.HasSuffix(dataType, "]") {
-		return TypeArray, nil
+	if inner, ok := strings.CutPrefix(dataType, "array["); ok && strings.HasSuffix(inner, "]") {
+		element, err := mapDataType(strings.TrimSuffix(inner, "]"))
+		if err != nil {
+			return "", err
+		}
+		return CanonicalType("ARRAY<" + string(element) + ">"), nil
 	}
 	return "", fmt.Errorf("fingerprint: unmapped analyzer type %q", dataType)
 }

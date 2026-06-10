@@ -1,6 +1,7 @@
 package fingerprint
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -276,6 +277,25 @@ func TestCollisionGuardMatch(t *testing.T) {
 	if !Match(noProfile, noProfile) {
 		t.Errorf("nil parse profiles do not Match themselves")
 	}
+
+	withNesting := same
+	withNesting.Nesting = json.RawMessage(`{"depth":1}`)
+	if Match(base, withNesting) {
+		t.Errorf("differing nesting still Matches")
+	}
+}
+
+// The canonical form is plain RFC 8259 JSON: no Go-specific HTML escaping,
+// so the hash is reproducible by any JSON implementation.
+func TestCanonicalBytesPlainJSON(t *testing.T) {
+	o := mustCSV(t, csvContract(csvField("a<b&c>", profile.TypeText)))
+	canonical := string(o.CanonicalBytes())
+	if strings.Contains(canonical, `\u003c`) || strings.Contains(canonical, `\u0026`) {
+		t.Errorf("canonical bytes use Go HTML escaping: %s", canonical)
+	}
+	if !strings.Contains(canonical, `"a<b&c>"`) {
+		t.Errorf("canonical bytes missing plain-JSON name: %s", canonical)
+	}
 }
 
 // Acceptance: a 3-schema contract fans out into 3 units with 3 fingerprints.
@@ -289,9 +309,12 @@ func TestMultiSchemaFanout(t *testing.T) {
 			{Name: "Items", Fields: []contract.FieldDefinition{{Name: "sku", DataType: "text"}, {Name: "qty", DataType: "numeric"}}},
 		},
 	}
-	units, err := FromDataContract(dc)
+	units, skipped, err := FromDataContract(dc)
 	if err != nil {
 		t.Fatalf("FromDataContract: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped schemas: %v", skipped)
 	}
 	if len(units) != 3 {
 		t.Fatalf("expected 3 units, got %d", len(units))
@@ -329,17 +352,20 @@ func TestFromDataContractAPI(t *testing.T) {
 			}},
 		},
 	}
-	units, err := FromDataContract(dc)
+	units, skipped, err := FromDataContract(dc)
 	if err != nil {
 		t.Fatalf("FromDataContract: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped schemas: %v", skipped)
 	}
 	if units[0].Object.Format != FormatAPI {
 		t.Errorf("format = %q, want api", units[0].Object.Format)
 	}
 	want := map[string]CanonicalType{
 		"id": TypeNumber, "email": TypeString, "created_at": TypeTemporal,
-		"active": TypeBoolean, "tags": TypeArray, "settings": TypeObject,
-		"ref": TypeString, "blob": TypeString,
+		"active": TypeBoolean, "tags": "ARRAY<STRING>", "settings": TypeObject,
+		"ref": TypeString, "blob": TypeBinary,
 	}
 	for _, f := range units[0].Object.Fields {
 		if want[f.Name] != f.Type {
@@ -391,19 +417,55 @@ func TestNameCanonicalisation(t *testing.T) {
 	}
 }
 
-// Duplicate canonical names keep a deterministic order via the type
-// tie-break, so even degenerate schemas fingerprint stably.
-func TestDuplicateNameDeterminism(t *testing.T) {
-	first := mustCSV(t, csvContract(
+// Duplicate canonical names degrade to positional identity: the name→type
+// pairing stays in the hash, so two files with swapped column types can
+// never share a fingerprint (the catastrophic false positive), and
+// reordering ambiguous columns is a miss, like headerless CSV.
+func TestDuplicateNamePositionalIdentity(t *testing.T) {
+	textFirst := mustCSV(t, csvContract(
 		csvField("a", profile.TypeText),
 		csvField("a ", profile.TypeNumeric),
 	))
-	second := mustCSV(t, csvContract(
-		csvField("a ", profile.TypeNumeric),
+	rebuilt := mustCSV(t, csvContract(
 		csvField("a", profile.TypeText),
+		csvField("a ", profile.TypeNumeric),
 	))
-	if first.Hash() != second.Hash() {
-		t.Errorf("duplicate-name ordering is not deterministic")
+	if textFirst.Hash() != rebuilt.Hash() {
+		t.Errorf("duplicate-name fingerprint is not deterministic")
+	}
+
+	typesSwapped := mustCSV(t, csvContract(
+		csvField("a", profile.TypeNumeric),
+		csvField("a ", profile.TypeText),
+	))
+	if typesSwapped.Hash() == textFirst.Hash() {
+		t.Errorf("swapped types behind duplicate names share a hash: false positive")
+	}
+	if Match(textFirst, typesSwapped) {
+		t.Errorf("swapped types behind duplicate names still Match")
+	}
+
+	wantNames := []string{"a#1", "a#2"}
+	for i, f := range textFirst.Fields {
+		if f.Name != wantNames[i] {
+			t.Errorf("field %d name = %q, want %q", i, f.Name, wantNames[i])
+		}
+	}
+}
+
+// Literal '#' in headers is escaped, so a real header can never collide
+// with a synthesized disambiguation suffix.
+func TestHashSuffixNamespaceIsPrivate(t *testing.T) {
+	literal := mustCSV(t, csvContract(
+		csvField("x#1", profile.TypeText),
+		csvField("x#2", profile.TypeNumeric),
+	))
+	synthesized := mustCSV(t, csvContract(
+		csvField("x", profile.TypeText),
+		csvField("x", profile.TypeNumeric),
+	))
+	if literal.Hash() == synthesized.Hash() {
+		t.Errorf("literal #-headers collide with synthesized duplicate suffixes")
 	}
 }
 
@@ -414,7 +476,7 @@ func TestErrors(t *testing.T) {
 	if _, err := FromJSON(nil); err == nil {
 		t.Errorf("nil JSON contract: expected error")
 	}
-	if _, err := FromDataContract(nil); err == nil {
+	if _, _, err := FromDataContract(nil); err == nil {
 		t.Errorf("nil data contract: expected error")
 	}
 	if _, err := FromCSV(csvContract()); err == nil {
@@ -429,20 +491,86 @@ func TestErrors(t *testing.T) {
 	if _, err := FromCSV(csvContract(csvField("a", profile.DataType("mystery")))); err == nil {
 		t.Errorf("unmapped type: expected error")
 	}
-	if _, err := FromDataContract(&contract.DataContract{Metadata: map[string]any{}}); err == nil {
+	if _, _, err := FromDataContract(&contract.DataContract{Metadata: map[string]any{}}); err == nil {
 		t.Errorf("undetectable format: expected error")
 	}
-	if _, err := FromDataContract(&contract.DataContract{Metadata: map[string]any{"source_format": "xlsx"}}); err == nil {
+	if _, _, err := FromDataContract(&contract.DataContract{Metadata: map[string]any{"source_format": "xlsx"}}); err == nil {
 		t.Errorf("no schemas: expected error")
 	}
-	badSchema := &contract.DataContract{
-		Metadata: map[string]any{"source_format": "xlsx"},
-		Schemas:  []contract.SchemaContract{{Name: "Bad", Fields: []contract.FieldDefinition{{Name: "x", DataType: "mystery"}}}},
+	destination := &contract.DataContract{
+		ContractType: "destination",
+		Metadata:     map[string]any{"source": "openapi"},
+		Schemas:      []contract.SchemaContract{{Name: "t", Fields: []contract.FieldDefinition{{Name: "x", DataType: "text"}}}},
 	}
-	if _, err := FromDataContract(badSchema); err == nil || !strings.Contains(err.Error(), `"Bad"`) {
-		t.Errorf("schema error not wrapped with schema name: %v", err)
+	if _, _, err := FromDataContract(destination); err == nil {
+		t.Errorf("destination contract: expected error")
 	}
 	if _, err := FromCSV(csvContract(csvField("a", "array[text"))); err == nil {
 		t.Errorf("malformed array type: expected error")
+	}
+	if _, err := FromCSV(csvContract(csvField("a", "array[]"))); err == nil {
+		t.Errorf("empty array element: expected error")
+	}
+	if _, err := FromCSV(csvContract(csvField("a", "array[mystery]"))); err == nil {
+		t.Errorf("unmapped array element: expected error")
+	}
+}
+
+// One bad schema must not cost the other units their fingerprints: the
+// failing sheet/endpoint is reported as skipped, the rest fan out normally.
+func TestFanoutIsolatesBadSchemas(t *testing.T) {
+	dc := &contract.DataContract{
+		Metadata: map[string]any{"source": "openapi"},
+		Schemas: []contract.SchemaContract{
+			{Name: "GET /good", Fields: []contract.FieldDefinition{{Name: "id", DataType: "integer"}}},
+			{Name: "GET /bad", Fields: []contract.FieldDefinition{{Name: "avatar", DataType: "file"}}},
+			{Name: "GET /also-good", Fields: []contract.FieldDefinition{{Name: "name", DataType: "text"}}},
+		},
+	}
+	units, skipped, err := FromDataContract(dc)
+	if err != nil {
+		t.Fatalf("FromDataContract: %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("expected 2 units, got %d", len(units))
+	}
+	if len(skipped) != 1 || skipped[0].Locator != "GET /bad" || skipped[0].Err == nil {
+		t.Fatalf("expected GET /bad skipped with error, got %+v", skipped)
+	}
+}
+
+// Nested array element types stay identity-bearing as far as the analyzer
+// exposes them.
+func TestNestedArrayTypes(t *testing.T) {
+	dc := &contract.DataContract{
+		Metadata: map[string]any{"source": "openapi"},
+		Schemas: []contract.SchemaContract{
+			{Name: "GET /matrix", Fields: []contract.FieldDefinition{{Name: "grid", DataType: "array[array[integer]]"}}},
+		},
+	}
+	units, skipped, err := FromDataContract(dc)
+	if err != nil || len(skipped) != 0 {
+		t.Fatalf("FromDataContract: err=%v skipped=%v", err, skipped)
+	}
+	if got := units[0].Object.Fields[0].Type; got != "ARRAY<ARRAY<NUMBER>>" {
+		t.Errorf("nested array type = %q, want ARRAY<ARRAY<NUMBER>>", got)
+	}
+
+	stringArrays := &contract.DataContract{
+		Metadata: map[string]any{"source": "openapi"},
+		Schemas: []contract.SchemaContract{
+			{Name: "GET /tags", Fields: []contract.FieldDefinition{{Name: "tags", DataType: "array[text]"}}},
+		},
+	}
+	intArrays := &contract.DataContract{
+		Metadata: map[string]any{"source": "openapi"},
+		Schemas: []contract.SchemaContract{
+			{Name: "GET /tags", Fields: []contract.FieldDefinition{{Name: "tags", DataType: "array[integer]"}}},
+		},
+	}
+	su, _, _ := FromDataContract(stringArrays)
+	iu, _, _ := FromDataContract(intArrays)
+	if su[0].Object.Hash() == iu[0].Object.Hash() {
+		t.Errorf("array element type change did not change hash")
 	}
 }
