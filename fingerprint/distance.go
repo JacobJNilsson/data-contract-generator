@@ -19,14 +19,20 @@ type Distance struct {
 	AddedRemoved      int
 }
 
-// Compare computes the structural distance between two objects.
+// Compare computes the structural distance between two objects. It is
+// deliberately AlgoVersion-agnostic: distance is advice for reference
+// selection, never an auto-match, and the re-fingerprint migration that
+// accompanies an algo bump recomputes objects under the new rules.
 func Compare(a, b Object) Distance {
+	return compare(fieldTypes(a.Fields), a, b)
+}
+
+func compare(aTypes map[string]CanonicalType, a, b Object) Distance {
 	if a.Format != b.Format {
 		return Distance{Disqualified: true}
 	}
 	d := Distance{ParseProfileDiffs: parseProfileDiffs(a.ParseProfile, b.ParseProfile)}
 
-	aTypes := fieldTypes(a.Fields)
 	bTypes := fieldTypes(b.Fields)
 	shared := 0
 	for name, aType := range aTypes {
@@ -77,9 +83,10 @@ func Rank(target Object, candidates []Object) []int {
 		index    int
 		distance Distance
 	}
+	targetTypes := fieldTypes(target.Fields)
 	rankedCandidates := make([]ranked, 0, len(candidates))
 	for i, candidate := range candidates {
-		d := Compare(target, candidate)
+		d := compare(targetTypes, target, candidate)
 		if d.Disqualified {
 			continue
 		}
@@ -118,6 +125,9 @@ func parseProfileDiffs(a, b *ParseProfile) int {
 	return diffs
 }
 
+// fieldTypes keys fields by name. Canonical field names are unique by
+// construction (canonicalFields disambiguates duplicates), so no entry is
+// ever silently overwritten.
 func fieldTypes(fields []Field) map[string]CanonicalType {
 	types := make(map[string]CanonicalType, len(fields))
 	for _, f := range fields {
