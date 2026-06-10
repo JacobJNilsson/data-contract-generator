@@ -20,6 +20,7 @@ go get github.com/JacobJNilsson/data-contract-generator@latest
 | [`supacontract`](supacontract/) | Analyze Supabase projects via PostgREST OpenAPI (no direct DB connection needed) |
 | [`verify`](verify/) | Validate contracts for structural correctness and semantic coherence |
 | [`transform`](transform/) | Generate transformation contracts with field mapping suggestions |
+| [`fingerprint`](fingerprint/) | Structural fingerprints: canonical schema identity, hashing, and near-neighbour ranking for the pipeline cache |
 
 ## Quick start
 
@@ -66,6 +67,7 @@ The pre-commit hook runs `make check` which enforces:
 | transform | 100% |
 | supacontract | 95% |
 | pgcontract | 85% (tested against real Postgres) |
+| fingerprint | 100% |
 
 ## Architecture
 
@@ -78,6 +80,7 @@ pgcontract/      ← PostgreSQL analysis
 supacontract/    ← Supabase analysis
 verify/          ← contract validation
 transform/       ← field mapping suggestions
+fingerprint/     ← structural identity for the pipeline cache
 ```
 
 No circular dependencies. No type aliases. Each analyzer imports `contract/` for shared types and stdlib for everything else (except `pgcontract` which uses `pgx`).
