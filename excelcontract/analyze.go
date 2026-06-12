@@ -87,9 +87,12 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) (*contract.Sche
 		return nil, nil
 	}
 
-	// Determine field names from the header row.
+	// Determine field names from the header row. A bounded probe of the
+	// rows below it lets the detector compare the candidate header's
+	// value classes against the column value classes, so a homogeneous
+	// headerless sheet is not mistaken for one with a header.
 	headerRow := rows[region.headerRow]
-	hasHeader := profile.DetectHeader(headerRow)
+	hasHeader := profile.DetectHeaderWithRows(headerRow, probeRows(rows, region.headerRow+1))
 
 	var fieldNames []string
 	if hasHeader {
@@ -180,6 +183,19 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) (*contract.Sche
 			RequiredFields: requiredFields(fields),
 		},
 	}, nil
+}
+
+// probeRows collects up to profile.HeaderProbeRows non-empty rows
+// starting at the given index, for header detection.
+func probeRows(rows [][]string, start int) [][]string {
+	var probe [][]string
+	for i := start; i < len(rows) && len(probe) < profile.HeaderProbeRows; i++ {
+		if isEmptyRow(rows[i]) {
+			continue
+		}
+		probe = append(probe, rows[i])
+	}
+	return probe
 }
 
 // requiredFields returns field names where all values are non-null.

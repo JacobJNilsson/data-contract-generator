@@ -5,10 +5,20 @@ import (
 	"strings"
 )
 
+// HeaderProbeRows is the recommended number of data rows to collect and
+// pass to DetectHeaderWithRows. It is large enough to establish stable
+// column value classes and small enough to keep memory bounded for
+// streaming analyzers.
+const HeaderProbeRows = 32
+
 // DetectHeader returns true if the first row looks like a header rather
-// than data. The heuristic: if every non-empty cell in the first row is
-// numeric, it is probably data. If at least one cell is non-numeric and
-// non-empty, it is probably a header.
+// than data, judging by the first row alone. The heuristic: if every
+// non-empty cell in the first row is numeric, it is probably data. If at
+// least one cell is non-numeric and non-empty, it is probably a header.
+//
+// When subsequent rows are available, prefer DetectHeaderWithRows, which
+// also compares the first row against the column value classes and
+// catches headerless files whose first row contains text.
 //
 // This uses the same IsNumeric function as type inference to ensure
 // consistent behavior.
@@ -26,6 +36,59 @@ func DetectHeader(firstRow []string) bool {
 		}
 	}
 	return false
+}
+
+// DetectHeaderWithRows returns true if the first row looks like a header
+// rather than data, using the rows that follow it as evidence.
+//
+// It starts from the single-row heuristic (DetectHeader): an all-numeric
+// first row is data. When the first row contains text it then compares
+// each first-row cell against the value class of its column in dataRows.
+// A first-row cell that parses as numeric or date in a column whose
+// remaining values are also numeric or date is strong evidence against a
+// header: real headers are names, not numbers or dates. One such column
+// is enough to conclude the file has no header, because a homogeneous
+// first row would otherwise be promoted to field names and consumers
+// would silently drop the first record.
+//
+// All-text files are genuinely ambiguous: a text header over text
+// columns and a headerless text file produce identical value classes.
+// For those we keep the historical behavior and report a header, since
+// no column-class evidence can distinguish the two cases.
+//
+// dataRows should be a bounded probe of the rows after the first one;
+// HeaderProbeRows is a sensible size. Passing no rows degrades to
+// DetectHeader.
+func DetectHeaderWithRows(firstRow []string, dataRows [][]string) bool {
+	if !DetectHeader(firstRow) {
+		return false
+	}
+	for col, cell := range firstRow {
+		first := ClassifyCell(cell)
+		if first != TypeNumeric && first != TypeDate {
+			continue
+		}
+		colClass := columnClass(dataRows, col)
+		if colClass == TypeNumeric || colClass == TypeDate {
+			return false
+		}
+	}
+	return true
+}
+
+// columnClass merges the cell classes of one column across rows, using
+// the same priority order as type inference (text > date > numeric >
+// empty). Rows shorter than col contribute an empty cell.
+func columnClass(rows [][]string, col int) DataType {
+	class := TypeEmpty
+	for _, row := range rows {
+		var value string
+		if col < len(row) {
+			value = row[col]
+		}
+		class = MergeTypes(class, ClassifyCell(value))
+	}
+	return class
 }
 
 // GenerateFieldNames returns column names for a headerless file by

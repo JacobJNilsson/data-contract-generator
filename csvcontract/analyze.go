@@ -40,10 +40,11 @@ func AnalyzeFile(ctx context.Context, path string, opts *Options) (*SourceContra
 //
 //  1. Sniff: read the first 8KB to detect encoding and delimiter, then
 //     seek back to the start.
-//  2. Stream: single sequential pass through all rows. The first row is
-//     used for header detection. Every data row is fed to per-column
-//     profilers (type inference, null counting, frequency tracking,
-//     min/max). Up to MaxSampleRows are kept for the SampleData field.
+//  2. Stream: single sequential pass through all rows. The first row
+//     plus a bounded probe of the following rows are used for header
+//     detection. Every data row is fed to per-column profilers (type
+//     inference, null counting, frequency tracking, min/max). Up to
+//     MaxSampleRows are kept for the SampleData field.
 //
 // Peak memory is bounded by MaxTracked (default 10,000) distinct values
 // per column plus MaxSampleRows (default 5) stored rows, regardless of
@@ -123,7 +124,29 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		return nil, fmt.Errorf("file is empty")
 	}
 
-	hasHeader := profile.DetectHeader(firstRow)
+	// Buffer a bounded probe of the following rows so header detection
+	// can compare the first row's value classes against the column
+	// value classes. A read error during the probe is remembered and
+	// surfaced after the buffered rows are processed, preserving the
+	// row number reported for parse errors.
+	var probe [][]string
+	var probeErr error
+	for len(probe) < profile.HeaderProbeRows {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		record, readErr := reader.Read()
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			probeErr = readErr
+			break
+		}
+		probe = append(probe, record)
+	}
+
+	hasHeader := profile.DetectHeaderWithRows(firstRow, probe)
 
 	var fieldNames []string
 	maxSampleRows := opts.maxSampleRows()
@@ -157,16 +180,26 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		colTypes[i] = profile.TypeEmpty
 	}
 
-	// If the first row is data, process it.
 	var sampleRows [][]string
 	totalRows := 0
 
-	if firstDataRow != nil {
+	processRow := func(record []string) {
 		totalRows++
-		observeRow(firstDataRow, profilers, colTypes, numFields)
+		observeRow(record, profilers, colTypes, numFields)
 		if len(sampleRows) < maxSampleRows {
-			sampleRows = append(sampleRows, firstDataRow)
+			sampleRows = append(sampleRows, record)
 		}
+	}
+
+	// If the first row is data, process it, then drain the probe buffer.
+	if firstDataRow != nil {
+		processRow(firstDataRow)
+	}
+	for _, record := range probe {
+		processRow(record)
+	}
+	if probeErr != nil {
+		return nil, fmt.Errorf("parse error at row %d: %w", totalRows+2, probeErr)
 	}
 
 	// Stream all remaining rows.
@@ -182,11 +215,7 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 		if readErr != nil {
 			return nil, fmt.Errorf("parse error at row %d: %w", totalRows+2, readErr)
 		}
-		totalRows++
-		observeRow(record, profilers, colTypes, numFields)
-		if len(sampleRows) < maxSampleRows {
-			sampleRows = append(sampleRows, record)
-		}
+		processRow(record)
 	}
 
 	topN := opts.topN()
