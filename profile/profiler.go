@@ -19,6 +19,7 @@ type ColumnProfiler struct {
 	maxTracked int
 	capped     bool
 	tracker    RangeTracker
+	shape      shapeTracker
 }
 
 // NewColumnProfiler creates a profiler that tracks up to maxTracked
@@ -40,6 +41,7 @@ func (p *ColumnProfiler) Observe(value string) {
 	}
 
 	p.tracker.Observe(value)
+	p.shape.observe(value)
 
 	if count, exists := p.freqs[value]; exists {
 		p.freqs[value] = count + 1
@@ -73,6 +75,7 @@ func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 		MinValue:       minVal,
 		MaxValue:       maxVal,
 		TopValues:      p.topValues(topN),
+		Shape:          p.shape.signature(),
 	}
 }
 
