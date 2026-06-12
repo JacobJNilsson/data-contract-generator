@@ -26,6 +26,7 @@ type FieldProfile struct {
 	MinValue       *string             `json:"min_value"`
 	MaxValue       *string             `json:"max_value"`
 	TopValues      []contract.TopValue `json:"top_values"`
+	Shape          ShapeSignature      `json:"shape"`
 }
 
 // Options controls the analysis behavior. A nil Options uses defaults.
