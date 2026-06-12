@@ -157,6 +157,120 @@ func TestAnalyzeNoHeader(t *testing.T) {
 	})
 }
 
+func TestAnalyzeHomogeneousNoHeader(t *testing.T) {
+	// Exact reproduction from issue #75: a headerless file where every
+	// row has the same value classes. The first row must be treated as
+	// data, not promoted to field names, or consumers silently drop a
+	// record.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "parts.csv")
+	content := "P-600,Kedjespannare K2,75.50,2026-06-07\n" +
+		"P-601,Drevsats 13T,189.00,2026-06-07\n" +
+		"P-602,Kedjelas X,45.25,2026-06-08\n" +
+		"P-603,Bromsok F4,320.00,2026-06-08\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	contract, err := AnalyzeFile(ctx, path, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	assertContract(t, contract, SourceContract{
+		SourceFormat: "csv",
+		Encoding:     "utf-8",
+		Delimiter:    ",",
+		HasHeader:    false,
+		TotalRows:    4,
+		Fields: []Field{
+			{Name: "column_1", DataType: profile.TypeText, Profile: profile.FieldProfile{
+				TotalCount: 4, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("P-600"), MaxValue: ptr("P-603"),
+				TopValues: []ct.TopValue{tv("P-600", 1), tv("P-601", 1), tv("P-602", 1), tv("P-603", 1)},
+			}},
+			{Name: "column_2", DataType: profile.TypeText, Profile: profile.FieldProfile{
+				TotalCount: 4, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("Bromsok F4"), MaxValue: ptr("Kedjespannare K2"),
+				TopValues: []ct.TopValue{tv("Bromsok F4", 1), tv("Drevsats 13T", 1), tv("Kedjelas X", 1), tv("Kedjespannare K2", 1)},
+			}},
+			{Name: "column_3", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
+				TotalCount: 4, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("45.25"), MaxValue: ptr("320.00"),
+				TopValues: []ct.TopValue{tv("189.00", 1), tv("320.00", 1), tv("45.25", 1), tv("75.50", 1)},
+			}},
+			{Name: "column_4", DataType: profile.TypeDate, Profile: profile.FieldProfile{
+				TotalCount: 4, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("2026-06-07"), MaxValue: ptr("2026-06-08"),
+				TopValues: []ct.TopValue{tv("2026-06-07", 2), tv("2026-06-08", 2)},
+			}},
+		},
+		SampleData: [][]string{
+			{"P-600", "Kedjespannare K2", "75.50", "2026-06-07"},
+			{"P-601", "Drevsats 13T", "189.00", "2026-06-07"},
+			{"P-602", "Kedjelas X", "45.25", "2026-06-08"},
+			{"P-603", "Bromsok F4", "320.00", "2026-06-08"},
+		},
+		Issues: nil,
+	})
+}
+
+func TestAnalyzeNumericFirstRowNoHeader(t *testing.T) {
+	// A first row whose numeric cell sits over a numeric column is
+	// strong evidence against a header even though the row contains
+	// text.
+	r := bytes.NewReader([]byte("widget,75.50\ngadget,189.00\nsprocket,45.25\n"))
+	contract, err := AnalyzeReader(ctx, r, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.HasHeader {
+		t.Error("expected no header for numeric first-row cell over numeric column")
+	}
+	if contract.TotalRows != 3 {
+		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
+	}
+	if contract.Fields[0].Name != "column_1" || contract.Fields[1].Name != "column_2" {
+		t.Errorf("field names = %q, %q, want column_1, column_2",
+			contract.Fields[0].Name, contract.Fields[1].Name)
+	}
+}
+
+func TestAnalyzeTemporalFirstRowNoHeader(t *testing.T) {
+	// Same as above but with a date cell over a date column.
+	r := bytes.NewReader([]byte("widget,2026-06-07\ngadget,2026-06-08\nsprocket,2026-06-09\n"))
+	contract, err := AnalyzeReader(ctx, r, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.HasHeader {
+		t.Error("expected no header for date first-row cell over date column")
+	}
+	if contract.TotalRows != 3 {
+		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
+	}
+	if contract.Fields[1].DataType != profile.TypeDate {
+		t.Errorf("column_2 data_type = %q, want %q", contract.Fields[1].DataType, profile.TypeDate)
+	}
+}
+
+func TestAnalyzeAllTextAssumesHeader(t *testing.T) {
+	// All-text files are genuinely ambiguous: a text header over text
+	// columns and a headerless text file have identical value classes.
+	// The historical behavior (assume a header) is pinned here.
+	r := bytes.NewReader([]byte("alpha,beta\ngamma,delta\nepsilon,zeta\n"))
+	contract, err := AnalyzeReader(ctx, r, nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if !contract.HasHeader {
+		t.Error("expected header for all-text file (documented ambiguity)")
+	}
+	if contract.TotalRows != 2 {
+		t.Errorf("total_rows = %d, want 2", contract.TotalRows)
+	}
+}
+
 func TestAnalyzeEmptyCSV(t *testing.T) {
 	contract, err := AnalyzeFile(ctx, "testdata/empty.csv", nil)
 	if err != nil {
@@ -738,6 +852,101 @@ func (r *failDuringStreamReader) Read(p []byte) (int, error) {
 func (r *failDuringStreamReader) Seek(offset int64, _ int) (int64, error) {
 	r.offset = int(offset)
 	return offset, nil
+}
+
+func TestAnalyzeReaderLateStreamParseError(t *testing.T) {
+	// A read error after the header-detection probe (32 rows) must be
+	// reported from the main streaming loop.
+	var buf bytes.Buffer
+	buf.WriteString("Name,Value\n")
+	for i := 0; i < 600; i++ {
+		fmt.Fprintf(&buf, "row%d,%d\n", i, i)
+	}
+	r := &failAtEndReader{data: buf.Bytes()}
+	_, err := AnalyzeReader(ctx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for late stream read failure")
+	}
+	if !strings.Contains(err.Error(), "injected late stream error") {
+		t.Errorf("error = %q, want to contain 'injected late stream error'", err)
+	}
+}
+
+// failAtEndReader serves its data normally but, once the analyzer has
+// seeked back to the start, replaces the final EOF with an error.
+type failAtEndReader struct {
+	data   []byte
+	offset int
+	seeked bool
+}
+
+func (r *failAtEndReader) Read(p []byte) (int, error) {
+	if r.offset >= len(r.data) {
+		if r.seeked {
+			return 0, fmt.Errorf("injected late stream error")
+		}
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
+
+func (r *failAtEndReader) Seek(offset int64, _ int) (int64, error) {
+	r.offset = int(offset)
+	r.seeked = true
+	return offset, nil
+}
+
+func TestAnalyzeReaderCancelAfterProbe(t *testing.T) {
+	// Cancellation that happens after the header-detection probe must be
+	// caught by the main streaming loop.
+	var buf bytes.Buffer
+	buf.WriteString("Name,Value\n")
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&buf, "row%d,%d\n", i, i)
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	r := &cancelOnSecondFillReader{
+		ReadSeeker: bytes.NewReader(buf.Bytes()),
+		cancel:     cancel,
+	}
+
+	_, err := AnalyzeReader(cancelCtx, r, nil)
+	if err == nil {
+		t.Fatal("expected error for context cancelled after probe")
+	}
+}
+
+// cancelOnSecondFillReader cancels the context on the second buffered
+// read after the analyzer has seeked back to the start. By then the
+// header-detection probe has long been satisfied from the first buffer
+// fill, so the cancellation lands in the main streaming loop.
+type cancelOnSecondFillReader struct {
+	io.ReadSeeker
+	cancel func()
+	seeked bool
+	fills  int
+}
+
+func (r *cancelOnSecondFillReader) Read(p []byte) (int, error) {
+	n, err := r.ReadSeeker.Read(p)
+	if r.seeked {
+		r.fills++
+		if r.fills >= 2 {
+			r.cancel()
+		}
+	}
+	return n, err
+}
+
+func (r *cancelOnSecondFillReader) Seek(offset int64, whence int) (int64, error) {
+	n, err := r.ReadSeeker.Seek(offset, whence)
+	if whence == io.SeekStart && offset == 0 {
+		r.seeked = true
+	}
+	return n, err
 }
 
 func TestAnalyzeRowShorterThanHeader(t *testing.T) {

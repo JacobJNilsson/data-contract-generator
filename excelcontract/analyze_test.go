@@ -396,6 +396,46 @@ func TestAnalyzeHeaderOnlySheet(t *testing.T) {
 	}
 }
 
+func TestAnalyzeHomogeneousSheetNoHeader(t *testing.T) {
+	// Same shape as the CSV reproduction in issue #75: every row has
+	// identical value classes, so the first row is data, not a header.
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	// Row 3 is left blank: blank rows are skipped both by the header
+	// probe and by profiling.
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"P-600", "Kedjespannare K2", "75.50", "2026-06-07"})
+	_ = f.SetSheetRow("Sheet1", "A2", &[]any{"P-601", "Drevsats 13T", "189.00", "2026-06-07"})
+	_ = f.SetSheetRow("Sheet1", "A4", &[]any{"P-602", "Kedjelas X", "45.25", "2026-06-08"})
+	_ = f.SetSheetRow("Sheet1", "A5", &[]any{"P-603", "Bromsok F4", "320.00", "2026-06-08"})
+
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("WriteToBuffer: %v", err)
+	}
+
+	dc, err := AnalyzeReader(ctx, bytes.NewReader(buf.Bytes()), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+
+	sc := dc.Schemas[0]
+	if sc.RowCount == nil || *sc.RowCount != 4 {
+		t.Errorf("row_count = %v, want 4", sc.RowCount)
+	}
+	if len(sc.Fields) != 4 {
+		t.Fatalf("fields count = %d, want 4", len(sc.Fields))
+	}
+	wantNames := []string{"column_1", "column_2", "column_3", "column_4"}
+	for i, want := range wantNames {
+		if sc.Fields[i].Name != want {
+			t.Errorf("fields[%d].Name = %q, want %q", i, sc.Fields[i].Name, want)
+		}
+	}
+	if len(sc.SampleData) == 0 || sc.SampleData[0][0] != "P-600" {
+		t.Errorf("sample_data[0] = %v, want first row preserved as data", sc.SampleData)
+	}
+}
+
 func TestAnalyzeAllEmptySheets(t *testing.T) {
 	// Create a workbook with only empty sheets.
 	f := excelize.NewFile()
