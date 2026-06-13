@@ -61,18 +61,36 @@ func DetectHeader(firstRow []string) bool {
 // HeaderProbeRows is a sensible size. Passing no rows degrades to
 // DetectHeader.
 func DetectHeaderWithRows(firstRow []string, dataRows [][]string) bool {
+	hasHeader, _ := DetectHeaderWithRowsConfidence(firstRow, dataRows)
+	return hasHeader
+}
+
+// DetectHeaderWithRowsConfidence is DetectHeaderWithRows with the
+// verdict's confidence exposed (issue #81). guessed is true when a
+// header was reported by the documented all-text fallback: no column
+// carried a numeric, date, timestamp, or boolean class to anchor the
+// decision, so a text header over text columns and a headerless text
+// file are indistinguishable and the historical header guess applies.
+// Callers can surface that uncertainty instead of expressing full
+// confidence in the contract.
+func DetectHeaderWithRowsConfidence(firstRow []string, dataRows [][]string) (hasHeader, guessed bool) {
 	if !DetectHeader(firstRow) {
-		return false
+		return false, false
 	}
+	anchored := false
 	for col, cell := range firstRow {
-		if !isDataValueClass(ClassifyCell(cell)) {
+		if !isDataValueClass(columnClass(dataRows, col)) {
 			continue
 		}
-		if isDataValueClass(columnClass(dataRows, col)) {
-			return false
+		// A typed column anchors the verdict either way: a first-row
+		// cell of the same kind means data, a name over typed values
+		// means a real header.
+		anchored = true
+		if isDataValueClass(ClassifyCell(cell)) {
+			return false, false
 		}
 	}
-	return true
+	return true, !anchored
 }
 
 // isDataValueClass reports whether a cell class is one real header

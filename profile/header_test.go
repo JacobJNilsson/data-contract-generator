@@ -167,6 +167,68 @@ func TestDetectHeaderWithRows(t *testing.T) {
 	}
 }
 
+// TestDetectHeaderWithRowsConfidence pins the guess marker added for
+// issue #81: a header verdict is a guess exactly when no column class
+// anchored it.
+func TestDetectHeaderWithRowsConfidence(t *testing.T) {
+	tests := []struct {
+		name      string
+		firstRow  []string
+		dataRows  [][]string
+		hasHeader bool
+		guessed   bool
+	}{
+		{
+			// The documented all-text fallback: header reported, but
+			// nothing distinguishes it from headerless text data.
+			name:      "all-text columns are a guess",
+			firstRow:  []string{"alpha", "beta"},
+			dataRows:  [][]string{{"gamma", "delta"}, {"epsilon", "zeta"}},
+			hasHeader: true,
+			guessed:   true,
+		},
+		{
+			// A text name over a numeric column anchors the verdict:
+			// real data in that column would have been numeric.
+			name:      "text header over numeric column is anchored",
+			firstRow:  []string{"Name", "Age"},
+			dataRows:  [][]string{{"Alice", "30"}, {"Bob", "25"}},
+			hasHeader: true,
+			guessed:   false,
+		},
+		{
+			name:      "numeric first row is data, not a guess",
+			firstRow:  []string{"1", "2"},
+			dataRows:  [][]string{{"3", "4"}},
+			hasHeader: false,
+			guessed:   false,
+		},
+		{
+			name:      "homogeneous rows are data, not a guess",
+			firstRow:  []string{"widget", "75.50"},
+			dataRows:  [][]string{{"gadget", "189.00"}},
+			hasHeader: false,
+			guessed:   false,
+		},
+		{
+			// No probe rows at all: the single-row heuristic has no
+			// column evidence, so the verdict is a guess.
+			name:      "no data rows is a guess",
+			firstRow:  []string{"Name", "Age"},
+			dataRows:  nil,
+			hasHeader: true,
+			guessed:   true,
+		},
+	}
+	for _, tt := range tests {
+		hasHeader, guessed := DetectHeaderWithRowsConfidence(tt.firstRow, tt.dataRows)
+		if hasHeader != tt.hasHeader || guessed != tt.guessed {
+			t.Errorf("DetectHeaderWithRowsConfidence(%s) = (%v, %v), want (%v, %v)",
+				tt.name, hasHeader, guessed, tt.hasHeader, tt.guessed)
+		}
+	}
+}
+
 func TestGenerateFieldNames(t *testing.T) {
 	names := GenerateFieldNames(3)
 	want := []string{"column_1", "column_2", "column_3"}
