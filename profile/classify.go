@@ -85,12 +85,14 @@ func IsNumeric(s string) bool {
 	case hasComma && hasDot:
 		return IsUSFormatNumber(s) || IsEuropeanFormatNumber(s)
 	case hasComma && !hasDot:
-		// Ambiguous: "1,234" could be US thousands (1234) or European
-		// decimal (1.234). We accept both as numeric. Downstream in
-		// ParseNumeric, comma-only values are parsed by removing commas
-		// (US interpretation). This is a known limitation -- it affects
-		// min/max profiling in files that use European decimal format
-		// without a dot.
+		// Comma-only values are ambiguous without file context. We accept
+		// both the US thousands shape (1,234) and the European decimal
+		// shape (10,5). ParseNumeric resolves the same two shapes the same
+		// way: a well-formed thousands pattern keeps US semantics, any
+		// other single-comma form is a decimal comma. "1,234" alone
+		// therefore stays one thousand two hundred thirty-four even in a
+		// European file; that residual ambiguity is unavoidable at the
+		// value level.
 		return IsUSThousandsOnly(s) || IsEuropeanDecimalOnly(s)
 	default:
 		// No comma, maybe a dot decimal or plain integer.

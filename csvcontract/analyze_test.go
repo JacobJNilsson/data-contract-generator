@@ -670,6 +670,33 @@ func TestAnalyzeContractJSON(t *testing.T) {
 	}
 }
 
+func TestAnalyzeSemicolonDecimalCommaCSV(t *testing.T) {
+	// Issue #79 reproduction: a semicolon-delimited Swedish export with
+	// decimal commas. Price must classify as numeric with the range
+	// compared numerically (2.75 < 9.25 < 10.5), not as if "10,5" were
+	// the US thousands form 105. Raw spellings are preserved in min/max.
+	data := []byte("Product;Price\nCoffee;10,5\nTea;9,25\nWater;2,75\n")
+	contract, err := AnalyzeReader(ctx, bytes.NewReader(data), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+
+	if contract.Delimiter != ";" {
+		t.Errorf("delimiter = %q, want \";\"", contract.Delimiter)
+	}
+
+	price := contract.Fields[1]
+	if price.DataType != profile.TypeNumeric {
+		t.Errorf("Price data_type = %q, want %q", price.DataType, profile.TypeNumeric)
+	}
+	if price.Profile.MinValue == nil || *price.Profile.MinValue != "2,75" {
+		t.Errorf("Price min_value = %v, want \"2,75\"", price.Profile.MinValue)
+	}
+	if price.Profile.MaxValue == nil || *price.Profile.MaxValue != "10,5" {
+		t.Errorf("Price max_value = %v, want \"10,5\"", price.Profile.MaxValue)
+	}
+}
+
 func TestAnalyzeDistinctCapSurfacedInJSON(t *testing.T) {
 	// The ID column has 5 distinct values, crossing MaxTracked=3, so its
 	// distinct count is a floor and must be flagged. The Status column
