@@ -44,12 +44,13 @@ func DetectHeader(firstRow []string) bool {
 // It starts from the single-row heuristic (DetectHeader): an all-numeric
 // first row is data. When the first row contains text it then compares
 // each first-row cell against the value class of its column in dataRows.
-// A first-row cell that parses as numeric or date in a column whose
-// remaining values are also numeric or date is strong evidence against a
-// header: real headers are names, not numbers or dates. One such column
-// is enough to conclude the file has no header, because a homogeneous
-// first row would otherwise be promoted to field names and consumers
-// would silently drop the first record.
+// A first-row cell that parses as numeric, date, timestamp, or boolean
+// in a column whose remaining values share one of those classes is
+// strong evidence against a header: real headers are names, not
+// numbers, dates, or true/false literals. One such column is enough to
+// conclude the file has no header, because a homogeneous first row
+// would otherwise be promoted to field names and consumers would
+// silently drop the first record.
 //
 // All-text files are genuinely ambiguous: a text header over text
 // columns and a headerless text file produce identical value classes.
@@ -64,21 +65,25 @@ func DetectHeaderWithRows(firstRow []string, dataRows [][]string) bool {
 		return false
 	}
 	for col, cell := range firstRow {
-		first := ClassifyCell(cell)
-		if first != TypeNumeric && first != TypeDate {
+		if !isDataValueClass(ClassifyCell(cell)) {
 			continue
 		}
-		colClass := columnClass(dataRows, col)
-		if colClass == TypeNumeric || colClass == TypeDate {
+		if isDataValueClass(columnClass(dataRows, col)) {
 			return false
 		}
 	}
 	return true
 }
 
+// isDataValueClass reports whether a cell class is one real header
+// names never have: numeric, date, timestamp, or boolean.
+func isDataValueClass(dt DataType) bool {
+	return dt == TypeNumeric || dt == TypeDate || dt == TypeTimestamp || dt == TypeBoolean
+}
+
 // columnClass merges the cell classes of one column across rows, using
-// the same priority order as type inference (text > date > numeric >
-// empty). Rows shorter than col contribute an empty cell.
+// the same priority order as type inference (see TypePriority). Rows
+// shorter than col contribute an empty cell.
 func columnClass(rows [][]string, col int) DataType {
 	class := TypeEmpty
 	for _, row := range rows {

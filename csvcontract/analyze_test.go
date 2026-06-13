@@ -70,6 +70,64 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 	})
 }
 
+// TestAnalyzeTruthfulTypes covers the issue #80 classification truths
+// end to end: leading-zero identifiers are text, booleans and ISO
+// timestamps get their own classes, timestamp ranges are chronological
+// (lexicographic order would put "2026-01-02 08:30:00" before
+// "2026-01-01T23:45:00" because space sorts before 'T'), and scientific
+// notation is numeric.
+func TestAnalyzeTruthfulTypes(t *testing.T) {
+	contract, err := AnalyzeFile(ctx, "testdata/truthful_types.csv", nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	assertContract(t, contract, SourceContract{
+		SourceFormat: "csv",
+		Encoding:     "utf-8",
+		Delimiter:    ",",
+		HasHeader:    true,
+		TotalRows:    3,
+		Fields: []Field{
+			{Name: "EmployeeID", DataType: profile.TypeText, Profile: profile.FieldProfile{
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("00042"), MaxValue: ptr("00044"),
+				TopValues: []ct.TopValue{tv("00042", 1), tv("00043", 1), tv("00044", 1)},
+			}},
+			{Name: "Active", DataType: profile.TypeBoolean, Profile: profile.FieldProfile{
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("False"), MaxValue: ptr("true"),
+				TopValues: []ct.TopValue{tv("False", 1), tv("TRUE", 1), tv("true", 1)},
+			}},
+			{Name: "LastLogin", DataType: profile.TypeTimestamp, Profile: profile.FieldProfile{
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("2026-01-01T23:45:00"), MaxValue: ptr("2026-01-02T10:00:00Z"),
+				TopValues: []ct.TopValue{
+					tv("2026-01-01T23:45:00", 1),
+					tv("2026-01-02 08:30:00", 1),
+					tv("2026-01-02T10:00:00Z", 1),
+				},
+			}},
+			{Name: "Zip", DataType: profile.TypeText, Profile: profile.FieldProfile{
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("00501"), MaxValue: ptr("00502"),
+				TopValues: []ct.TopValue{tv("00502", 2), tv("00501", 1)},
+			}},
+			{Name: "Score", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
+				TotalCount: 3, NullCount: 0, NullPercentage: 0,
+				MinValue: ptr("50"), MaxValue: ptr("250"),
+				TopValues: []ct.TopValue{tv("1e2", 1), tv("250", 1), tv("50", 1)},
+			}},
+		},
+		SampleData: [][]string{
+			{"00042", "true", "2026-01-02 08:30:00", "00501", "1e2"},
+			{"00043", "False", "2026-01-01T23:45:00", "00502", "50"},
+			{"00044", "TRUE", "2026-01-02T10:00:00Z", "00502", "250"},
+		},
+		Issues: nil,
+	})
+}
+
 func TestAnalyzeEuropeanCSV(t *testing.T) {
 	contract, err := AnalyzeFile(ctx, "testdata/european.csv", nil)
 	if err != nil {
