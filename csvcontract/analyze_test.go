@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	ct "github.com/JacobJNilsson/data-contract-generator/contract"
 	"github.com/JacobJNilsson/data-contract-generator/profile"
@@ -338,14 +339,14 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 	})
 }
 
-func TestAnalyzeLatin1(t *testing.T) {
-	contract, err := AnalyzeFile(ctx, "testdata/latin1.csv", nil)
+func TestAnalyzeWindows1252(t *testing.T) {
+	contract, err := AnalyzeFile(ctx, "testdata/windows1252.csv", nil)
 	if err != nil {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
 
-	if contract.Encoding != "latin-1" {
-		t.Errorf("encoding = %q, want %q", contract.Encoding, "latin-1")
+	if contract.Encoding != "windows-1252" {
+		t.Errorf("encoding = %q, want %q", contract.Encoding, "windows-1252")
 	}
 	if contract.TotalRows != 3 {
 		t.Errorf("total_rows = %d, want 3", contract.TotalRows)
@@ -355,6 +356,132 @@ func TestAnalyzeLatin1(t *testing.T) {
 	}
 	if contract.Fields[0].Name != "Name" {
 		t.Errorf("field 0 name = %q, want %q", contract.Fields[0].Name, "Name")
+	}
+	if contract.SampleData[0][0] != "René" {
+		t.Errorf("sample[0][0] = %q, want %q", contract.SampleData[0][0], "René")
+	}
+}
+
+// Reproduction of issue 77: a valid UTF-8 file whose multibyte rune
+// straddles the 8192-byte sniff boundary was misclassified latin-1 and
+// the whole file silently decoded as mojibake.
+func TestAnalyzeUTF8RuneStraddlingSniffBoundary(t *testing.T) {
+	// Build a single-column CSV where the lead byte of o-umlaut
+	// (0xC3 0xB6 in UTF-8) lands exactly on the last byte of the
+	// sniff buffer, index sniffSize-1.
+	var b bytes.Buffer
+	b.WriteString("city\n")
+	rowStart := sniffSize - 1 - len("Malm")
+	b.WriteString(strings.Repeat("x", rowStart-b.Len()-1))
+	b.WriteString("\n")
+	b.WriteString("Malmö\n")
+	b.WriteString("xtail\n")
+
+	if got := b.Bytes()[sniffSize-1]; got != 0xC3 {
+		t.Fatalf("test setup: byte %d = %#x, want 0xC3", sniffSize-1, got)
+	}
+
+	contract, err := AnalyzeReader(ctx, bytes.NewReader(b.Bytes()), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.Encoding != "utf-8" {
+		t.Errorf("encoding = %q, want %q", contract.Encoding, "utf-8")
+	}
+	// "Malmö" sorts before the lowercase filler values, so it is the
+	// column minimum. Any mojibake decode would change it.
+	city := contract.Fields[0]
+	if city.Profile.MinValue == nil || *city.Profile.MinValue != "Malmö" {
+		t.Errorf("min value = %v, want %q", city.Profile.MinValue, "Malmö")
+	}
+}
+
+func TestAnalyzeUTF16(t *testing.T) {
+	const csv = "Name,City\nRené,Malmö\nKäthe,Göteborg\n"
+
+	tests := []struct {
+		name         string
+		encode       func(string) []byte
+		wantEncoding string
+		wantIssue    string
+	}{
+		{
+			name:         "little endian",
+			encode:       encodeUTF16LE,
+			wantEncoding: "utf-16le",
+			wantIssue:    "UTF-16 LE BOM detected; input decoded to UTF-8",
+		},
+		{
+			name:         "big endian",
+			encode:       encodeUTF16BE,
+			wantEncoding: "utf-16be",
+			wantIssue:    "UTF-16 BE BOM detected; input decoded to UTF-8",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data := tt.encode(csv)
+			contract, err := AnalyzeReader(ctx, bytes.NewReader(data), nil)
+			if err != nil {
+				t.Fatalf("AnalyzeReader: %v", err)
+			}
+			if contract.Encoding != tt.wantEncoding {
+				t.Errorf("encoding = %q, want %q", contract.Encoding, tt.wantEncoding)
+			}
+			if !slices.Contains(contract.Issues, tt.wantIssue) {
+				t.Errorf("issues = %v, want to contain %q", contract.Issues, tt.wantIssue)
+			}
+			if contract.Fields[0].Name != "Name" || contract.Fields[1].Name != "City" {
+				t.Errorf("field names = %q, %q, want Name, City", contract.Fields[0].Name, contract.Fields[1].Name)
+			}
+			wantSamples := [][]string{{"René", "Malmö"}, {"Käthe", "Göteborg"}}
+			if !slices.EqualFunc(contract.SampleData, wantSamples, slices.Equal) {
+				t.Errorf("sample data = %v, want %v", contract.SampleData, wantSamples)
+			}
+		})
+	}
+}
+
+// encodeUTF16LE encodes s as UTF-16 little endian with a leading BOM,
+// the layout produced by Excel "Unicode Text" exports.
+func encodeUTF16LE(s string) []byte {
+	units := utf16.Encode([]rune("\uFEFF" + s))
+	out := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		out = append(out, byte(u), byte(u>>8))
+	}
+	return out
+}
+
+// encodeUTF16BE encodes s as UTF-16 big endian with a leading BOM.
+func encodeUTF16BE(s string) []byte {
+	units := utf16.Encode([]rune("\uFEFF" + s))
+	out := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		out = append(out, byte(u>>8), byte(u))
+	}
+	return out
+}
+
+func TestAnalyzeWindows1252Punctuation(t *testing.T) {
+	// windows-1252 bytes: 0x93/0x94 are smart quotes, 0x92 is a right
+	// single quote, and 0xE5 0xE4 0xF6 are the Swedish letters å ä ö.
+	data := []byte("Quote,Place\n\x93hi\x94,Sk\xE5ne\nit\x92s,V\xE4ster\xE5s\nplain,Malm\xF6\n")
+
+	contract, err := AnalyzeReader(ctx, bytes.NewReader(data), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	if contract.Encoding != "windows-1252" {
+		t.Errorf("encoding = %q, want %q", contract.Encoding, "windows-1252")
+	}
+	wantSamples := [][]string{
+		{"“hi”", "Skåne"},
+		{"it’s", "Västerås"},
+		{"plain", "Malmö"},
+	}
+	if !slices.EqualFunc(contract.SampleData, wantSamples, slices.Equal) {
+		t.Errorf("sample data = %v, want %v", contract.SampleData, wantSamples)
 	}
 }
 

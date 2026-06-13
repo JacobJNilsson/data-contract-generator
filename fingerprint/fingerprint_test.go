@@ -153,7 +153,7 @@ func TestSensitivity(t *testing.T) {
 		csvField("a", profile.TypeText),
 		csvField("b", profile.TypeNumeric),
 	)
-	encodingChanged.Encoding = "latin-1"
+	encodingChanged.Encoding = "windows-1252"
 	variants["encoding change"] = encodingChanged
 
 	for name, variant := range variants {
