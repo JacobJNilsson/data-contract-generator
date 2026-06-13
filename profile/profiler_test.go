@@ -281,6 +281,19 @@ func TestParseNumeric(t *testing.T) {
 		{"-1,234.56", -1234.56, true},
 		{"abc.def,gh", 0, false},
 		{"-", 0, false},
+		// Issue #80: ParseNumeric and IsNumeric share one definition.
+		{"00502", 0, false}, // leading-zero identifier
+		{"-007", -7, true},  // a minus signals numeric intent
+		{"1e5", 100000, true},
+		{"1.5e-3", 0.0015, true},
+		{"-2E3", -2000, true},
+		{"NaN", 0, false},
+		{"Inf", 0, false},
+		{"-Inf", 0, false},
+		{"+5", 0, false},
+		{"\"-5\"", -5, true}, // quoted negative
+		{"1e999", 0, false},  // overflows float64
+		{"1,234.", 0, false}, // malformed mixed-separator form
 	}
 	for _, tt := range tests {
 		got, ok := ParseNumeric(tt.input)
@@ -295,13 +308,15 @@ func TestParseNumeric(t *testing.T) {
 }
 
 // TestParseNumericAgreesWithIsNumeric pins that classification and
-// parsing accept the same comma forms, so a column classified numeric
-// never contains values the range tracker cannot parse (full
-// reconciliation across all forms is issue #80).
+// parsing share one definition of numeric (issue #80): a value
+// classifies as numeric exactly when the range tracker can parse it.
 func TestParseNumericAgreesWithIsNumeric(t *testing.T) {
 	inputs := []string{
 		"10,5", "9,25", "2,75", "-10,5", "12,34", "1,2345",
 		"1,234", "1,234,567", "1,23,456", "1,234.56", "5,", ",5",
+		"00502", "007", "-007", "0", "1e5", "1.5e-3", "NaN", "Inf",
+		"-Inf", "+5", "\"-5\"", "\"007\"", "1e999", "1,234.", "0x10",
+		"9007199254740993", "99999999999999999999",
 	}
 	for _, in := range inputs {
 		_, parseOK := ParseNumeric(in)
@@ -340,6 +355,169 @@ func TestRangeTrackerMixedCommaConventions(t *testing.T) {
 	}
 	if tracker.Max() != "1,234" {
 		t.Errorf("max = %q, want \"1,234\"", tracker.Max())
+	}
+}
+
+// TestRangeTrackerIntegerSafe pins integer-exact comparison past 2^53
+// (issue #80): as float64, 9007199254740993 rounds to the same value as
+// 9007199254740992, so float comparison would corrupt the ordering.
+func TestRangeTrackerIntegerSafe(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("9007199254740993")
+	tracker.Observe("9007199254740992")
+	if tracker.Min() != "9007199254740992" {
+		t.Errorf("min = %q, want 9007199254740992", tracker.Min())
+	}
+	if tracker.Max() != "9007199254740993" {
+		t.Errorf("max = %q, want 9007199254740993", tracker.Max())
+	}
+}
+
+// TestRangeTrackerIntegerSafeNegative covers the same hazard below zero.
+func TestRangeTrackerIntegerSafeNegative(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("-9007199254740992")
+	tracker.Observe("-9007199254740993")
+	if tracker.Min() != "-9007199254740993" {
+		t.Errorf("min = %q, want -9007199254740993", tracker.Min())
+	}
+	if tracker.Max() != "-9007199254740992" {
+		t.Errorf("max = %q, want -9007199254740992", tracker.Max())
+	}
+}
+
+// TestRangeTrackerIntegerBeyondInt64 pins the documented fallback:
+// integers beyond int64 compare as float64.
+func TestRangeTrackerIntegerBeyondInt64(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("99999999999999999999") // 20 digits, beyond int64
+	tracker.Observe("1")
+	if tracker.Min() != "1" {
+		t.Errorf("min = %q, want 1", tracker.Min())
+	}
+	if tracker.Max() != "99999999999999999999" {
+		t.Errorf("max = %q, want 99999999999999999999", tracker.Max())
+	}
+}
+
+// TestRangeTrackerNaNExcluded is the issue #80 regression: NaN is not
+// numeric, so it can no longer poison the numeric min/max (every
+// comparison against NaN is false, which used to freeze the extremes).
+func TestRangeTrackerNaNExcluded(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("NaN")
+	tracker.Observe("5")
+	tracker.Observe("10")
+	// NaN demotes the column to lexicographic ordering.
+	if tracker.Min() != "10" {
+		t.Errorf("min = %q, want \"10\" (lexicographic)", tracker.Min())
+	}
+	if tracker.Max() != "NaN" {
+		t.Errorf("max = %q, want \"NaN\"", tracker.Max())
+	}
+}
+
+// TestRangeTrackerLeadingZeroIdentifiers pins that identifier columns
+// (issue #80) order lexicographically, which preserves the spellings.
+func TestRangeTrackerLeadingZeroIdentifiers(t *testing.T) {
+	var tracker RangeTracker
+	for _, v := range []string{"00502", "00042", "00999"} {
+		tracker.Observe(v)
+	}
+	if tracker.Min() != "00042" {
+		t.Errorf("min = %q, want 00042", tracker.Min())
+	}
+	if tracker.Max() != "00999" {
+		t.Errorf("max = %q, want 00999", tracker.Max())
+	}
+}
+
+// TestRangeTrackerChronological pins chronological ordering for ISO
+// temporal columns (issue #80). Lexicographically "2026-01-02 00:00:00"
+// sorts before "2026-01-01T23:00" because space sorts before 'T', so a
+// byte comparison would invert this range.
+func TestRangeTrackerChronological(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("2026-01-01T23:00")
+	tracker.Observe("2026-01-02 00:00:00")
+	if tracker.Min() != "2026-01-01T23:00" {
+		t.Errorf("min = %q, want 2026-01-01T23:00", tracker.Min())
+	}
+	if tracker.Max() != "2026-01-02 00:00:00" {
+		t.Errorf("max = %q, want 2026-01-02 00:00:00", tracker.Max())
+	}
+}
+
+// TestRangeTrackerChronologicalZones pins that zone offsets order by
+// instant, not by spelling.
+func TestRangeTrackerChronologicalZones(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("2026-01-01T12:00:00+02:00") // 10:00 UTC
+	tracker.Observe("2026-01-01T11:00:00Z")      // 11:00 UTC
+	if tracker.Min() != "2026-01-01T12:00:00+02:00" {
+		t.Errorf("min = %q, want the +02:00 spelling (earlier instant)", tracker.Min())
+	}
+	if tracker.Max() != "2026-01-01T11:00:00Z" {
+		t.Errorf("max = %q, want 2026-01-01T11:00:00Z", tracker.Max())
+	}
+}
+
+// TestRangeTrackerDatesAndTimestampsMix pins that ISO dates and
+// timestamps share the chronological ordering (dates read as midnight).
+func TestRangeTrackerDatesAndTimestampsMix(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("2026-01-02")
+	tracker.Observe("2026-01-01T23:59:59")
+	tracker.Observe("2026-01-03")
+	if tracker.Min() != "2026-01-01T23:59:59" {
+		t.Errorf("min = %q, want 2026-01-01T23:59:59", tracker.Min())
+	}
+	if tracker.Max() != "2026-01-03" {
+		t.Errorf("max = %q, want 2026-01-03", tracker.Max())
+	}
+}
+
+// TestRangeTrackerSlashDatesStayLexicographic pins the documented
+// limitation (issue #80): ambiguous slash dates cannot be ordered
+// chronologically, so the tracker keeps byte order for them.
+func TestRangeTrackerSlashDatesStayLexicographic(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("15/01/2026")
+	tracker.Observe("02/12/2025")
+	if tracker.Min() != "02/12/2025" {
+		t.Errorf("min = %q, want 02/12/2025 (lexicographic)", tracker.Min())
+	}
+	if tracker.Max() != "15/01/2026" {
+		t.Errorf("max = %q, want 15/01/2026", tracker.Max())
+	}
+}
+
+// TestRangeTrackerTemporalToLexSwap pins the demotion to lexicographic
+// ordering when a non-temporal value lands in a temporal column.
+func TestRangeTrackerTemporalToLexSwap(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("2026-01-01T23:00")
+	tracker.Observe("2026-01-02 00:00:00")
+	tracker.Observe("pending")
+	if tracker.Min() != "2026-01-01T23:00" {
+		t.Errorf("min = %q, want 2026-01-01T23:00 (lexicographic)", tracker.Min())
+	}
+	if tracker.Max() != "pending" {
+		t.Errorf("max = %q, want pending", tracker.Max())
+	}
+}
+
+// TestRangeTrackerTemporalAfterNonTemporal covers the path where the
+// first value already broke the temporal mode.
+func TestRangeTrackerTemporalAfterNonTemporal(t *testing.T) {
+	var tracker RangeTracker
+	tracker.Observe("pending")
+	tracker.Observe("2026-01-01T23:00")
+	if tracker.Min() != "2026-01-01T23:00" {
+		t.Errorf("min = %q, want 2026-01-01T23:00 (lexicographic)", tracker.Min())
+	}
+	if tracker.Max() != "pending" {
+		t.Errorf("max = %q, want pending", tracker.Max())
 	}
 }
 

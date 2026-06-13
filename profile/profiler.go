@@ -3,8 +3,8 @@ package profile
 import (
 	"math"
 	"slices"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
@@ -105,43 +105,63 @@ func (p *ColumnProfiler) topValues(topN int) []contract.TopValue {
 	return entries
 }
 
-// RangeTracker tracks the minimum and maximum values seen so far,
-// using numeric-aware comparison. When all observed values are parseable
-// as numbers, it compares numerically (so "9" < "10"). When any non-numeric
-// value is seen, it falls back to lexicographic comparison.
+// RangeTracker tracks the minimum and maximum values seen so far, using
+// type-aware comparison. When all observed values are numeric, it
+// compares numerically (so "9" < "10"), integer-safely when both sides
+// are plain integers within int64 (issue #80: beyond 2^53 float64
+// corrupts ordering). When all observed values are unambiguous ISO
+// dates or timestamps, it compares chronologically. Otherwise it falls
+// back to lexicographic comparison; in particular, ambiguous slash-form
+// dates (03/04/2026) stay lexicographic because their reading is
+// unknown.
 //
-// Both numeric and lexicographic min/max are tracked simultaneously so
-// that switching modes does not require storing all observed values.
+// All three orderings are tracked simultaneously so that switching
+// modes does not require storing all observed values.
 type RangeTracker struct {
 	// Numeric min/max (used when allNumeric is true).
-	minNum, maxNum float64
-	minStr, maxStr string // string representations of the numeric extremes
+	minNum, maxNum       numericValue
+	minNumStr, maxNumStr string // raw spellings of the numeric extremes
+	// Chronological min/max (used when allTemporal is true).
+	minTime, maxTime       time.Time
+	minTimeStr, maxTimeStr string // raw spellings of the temporal extremes
 	// Lexicographic min/max (always tracked).
-	lexMin, lexMax   string
-	seen, allNumeric bool
+	lexMin, lexMax                string
+	seen, allNumeric, allTemporal bool
 }
 
 // Observe records a value for range tracking.
 func (t *RangeTracker) Observe(v string) {
-	numVal, isNum := ParseNumeric(v)
+	num, isNum := parseNumericValue(v)
+	var temp time.Time
+	isTemp := false
+	if !isNum {
+		temp, isTemp = ParseTemporal(v)
+	}
 
 	if !t.seen {
-		t.minNum = numVal
-		t.maxNum = numVal
-		t.minStr = v
-		t.maxStr = v
-		t.lexMin = v
-		t.lexMax = v
-		t.allNumeric = isNum
 		t.seen = true
+		t.lexMin, t.lexMax = v, v
+		t.allNumeric = isNum
+		t.allTemporal = isTemp
+		if isNum {
+			t.minNum, t.maxNum = num, num
+			t.minNumStr, t.maxNumStr = v, v
+		}
+		if isTemp {
+			t.minTime, t.maxTime = temp, temp
+			t.minTimeStr, t.maxTimeStr = v, v
+		}
 		return
 	}
 
-	if t.allNumeric && !isNum {
+	if !isNum {
 		t.allNumeric = false
 	}
+	if !isTemp {
+		t.allTemporal = false
+	}
 
-	// Always track lexicographic min/max
+	// Always track lexicographic min/max.
 	if v < t.lexMin {
 		t.lexMin = v
 	}
@@ -149,34 +169,64 @@ func (t *RangeTracker) Observe(v string) {
 		t.lexMax = v
 	}
 
-	// Track numeric min/max when value is numeric
-	if isNum {
-		if numVal < t.minNum {
-			t.minNum = numVal
-			t.minStr = v
+	// Track numeric min/max while the column is still all-numeric.
+	if t.allNumeric {
+		if numLess(num, t.minNum) {
+			t.minNum = num
+			t.minNumStr = v
 		}
-		if numVal > t.maxNum {
-			t.maxNum = numVal
-			t.maxStr = v
+		if numLess(t.maxNum, num) {
+			t.maxNum = num
+			t.maxNumStr = v
+		}
+	}
+
+	// Track chronological min/max while the column is still all-temporal.
+	if t.allTemporal {
+		if temp.Before(t.minTime) {
+			t.minTime = temp
+			t.minTimeStr = v
+		}
+		if temp.After(t.maxTime) {
+			t.maxTime = temp
+			t.maxTimeStr = v
 		}
 	}
 }
 
-// Min returns the minimum value observed, using numeric comparison when
-// all values were numeric, otherwise lexicographic.
-func (t *RangeTracker) Min() string {
-	if t.allNumeric {
-		return t.minStr
+// numLess compares two numeric values, exactly via int64 when both are
+// plain integers in range, otherwise via float64.
+func numLess(a, b numericValue) bool {
+	if a.isInt && b.isInt {
+		return a.i < b.i
 	}
-	return t.lexMin
+	return a.f < b.f
+}
+
+// Min returns the minimum value observed: numeric comparison when all
+// values were numeric, chronological when all values were ISO dates or
+// timestamps, otherwise lexicographic.
+func (t *RangeTracker) Min() string {
+	switch {
+	case t.allNumeric:
+		return t.minNumStr
+	case t.allTemporal:
+		return t.minTimeStr
+	default:
+		return t.lexMin
+	}
 }
 
 // Max returns the maximum value observed.
 func (t *RangeTracker) Max() string {
-	if t.allNumeric {
-		return t.maxStr
+	switch {
+	case t.allNumeric:
+		return t.maxNumStr
+	case t.allTemporal:
+		return t.maxTimeStr
+	default:
+		return t.lexMax
 	}
-	return t.lexMax
 }
 
 // Seen returns whether any values have been observed.
@@ -190,7 +240,10 @@ func IsNull(v string) bool {
 }
 
 // ParseNumeric attempts to parse a string as a float64, handling both
-// US (1,234.56) and European (1.234,56) number formats.
+// US (1,234.56) and European (1.234,56) number formats. It is a view
+// over parseNumericValue, the single definition of numeric shared with
+// IsNumeric and RangeTracker (issue #80), so a value classifies as
+// numeric exactly when it parses.
 //
 // Comma-only values (commas, no dots) are disambiguated by shape, since
 // the profiler has no file-level context such as the delimiter:
@@ -201,79 +254,8 @@ func IsNull(v string) bool {
 //
 // The residual ambiguity is real: "1,234" in a Swedish file is still
 // read as one thousand two hundred thirty-four, and a column mixing
-// both conventions keeps whatever each individual value says. IsNumeric
-// accepts exactly the same comma-only forms, so classification and
-// range tracking agree.
+// both conventions keeps whatever each individual value says.
 func ParseNumeric(s string) (float64, bool) {
-	s = strings.TrimSpace(s)
-	s = strings.Trim(s, "\"")
-	if s == "" {
-		return 0, false
-	}
-
-	negative := strings.HasPrefix(s, "-")
-	core := strings.TrimPrefix(s, "-")
-	if core == "" {
-		return 0, false
-	}
-
-	// Try plain parse first (handles integers and simple decimals).
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f, true
-	}
-
-	hasComma := strings.Contains(core, ",")
-	hasDot := strings.Contains(core, ".")
-
-	var result float64
-	parsed := false
-
-	switch {
-	case hasComma && hasDot:
-		// Determine format by which separator comes last.
-		lastComma := strings.LastIndex(core, ",")
-		lastDot := strings.LastIndex(core, ".")
-		if lastDot > lastComma {
-			// US: 1,234.56 -> remove commas.
-			cleaned := strings.ReplaceAll(core, ",", "")
-			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
-				result = f
-				parsed = true
-			}
-		} else {
-			// European: 1.234,56 -> remove dots, comma to dot.
-			cleaned := strings.ReplaceAll(core, ".", "")
-			cleaned = strings.Replace(cleaned, ",", ".", 1)
-			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
-				result = f
-				parsed = true
-			}
-		}
-	case hasComma:
-		switch {
-		case IsUSThousandsOnly(core):
-			// Well-formed US thousands: 1,234 or 1,234,567.
-			cleaned := strings.ReplaceAll(core, ",", "")
-			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
-				result = f
-				parsed = true
-			}
-		case IsEuropeanDecimalOnly(core):
-			// Decimal comma: 10,5 means 10.5.
-			cleaned := strings.Replace(core, ",", ".", 1)
-			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
-				result = f
-				parsed = true
-			}
-		}
-	}
-
-	if parsed {
-		if negative {
-			result = -result
-		}
-		return result, true
-	}
-
-	return 0, false
+	nv, ok := parseNumericValue(s)
+	return nv.f, ok
 }

@@ -172,8 +172,9 @@ func TestAnalyzeTypes(t *testing.T) {
 	assertField(t, sc.Fields[1], "Integer", "numeric")
 	assertField(t, sc.Fields[2], "Decimal", "numeric")
 	assertField(t, sc.Fields[3], "Date", "date")
-	// Booleans come through as text from GetRows ("TRUE"/"FALSE").
-	assertField(t, sc.Fields[4], "Boolean", "text")
+	// GetRows renders booleans as "TRUE"/"FALSE", which the boolean
+	// class added by issue #80 now recognizes (previously text).
+	assertField(t, sc.Fields[4], "Boolean", "boolean")
 }
 
 func TestAnalyzeSingleColumn(t *testing.T) {

@@ -63,6 +63,39 @@ func TestDetectHeaderWithRows(t *testing.T) {
 			want: false,
 		},
 		{
+			// Issue #80: a timestamp first-row cell over a timestamp
+			// column is data evidence, exactly like dates.
+			name:     "timestamp first-row cell in timestamp column",
+			firstRow: []string{"widget", "2026-06-07T08:00:00"},
+			dataRows: [][]string{
+				{"gadget", "2026-06-08 09:30:00"},
+				{"sprocket", "2026-06-09T10:15:00Z"},
+			},
+			want: false,
+		},
+		{
+			// Issue #80: boolean literals are values, not header names.
+			name:     "boolean first-row cell in boolean column",
+			firstRow: []string{"widget", "true"},
+			dataRows: [][]string{
+				{"gadget", "false"},
+				{"sprocket", "TRUE"},
+			},
+			want: false,
+		},
+		{
+			// Issue #80: leading-zero identifiers classify as text now,
+			// so an identifier-only file degrades to the documented
+			// all-text ambiguity and keeps the historical header guess.
+			name:     "leading-zero identifier columns stay ambiguous",
+			firstRow: []string{"00501", "alpha"},
+			dataRows: [][]string{
+				{"00502", "beta"},
+				{"00503", "gamma"},
+			},
+			want: true,
+		},
+		{
 			// Regression: a classic text header over numeric data must
 			// still be detected as a header.
 			name:     "text header over numeric columns",
