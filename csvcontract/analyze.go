@@ -65,11 +65,16 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 	encoding, hasBOM := detectEncodingFromBytes(sniffBuf)
 
 	delimBuf := sniffBuf
-	if hasBOM {
-		delimBuf = bytes.TrimPrefix(delimBuf, utf8BOM)
-	}
-	if encoding == "latin-1" {
-		delimBuf = decodeLatin1(delimBuf)
+	switch encoding {
+	case encodingUTF8:
+		if hasBOM {
+			delimBuf = bytes.TrimPrefix(delimBuf, utf8BOM)
+		}
+	case encodingUTF16LE, encodingUTF16BE:
+		// The UTF-16 decoder consumes the BOM itself.
+		delimBuf = decodeUTF16(delimBuf)
+	case encodingWindows1252:
+		delimBuf = decodeWindows1252(delimBuf)
 	}
 	delimiter := detectDelimiterFromBytes(delimBuf)
 
@@ -80,14 +85,18 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 
 	// Phase 2: stream through the CSV content.
 	var csvReader io.Reader = rs
-	if hasBOM {
-		bomBuf := make([]byte, len(utf8BOM))
-		if _, err := io.ReadFull(rs, bomBuf); err != nil {
-			return nil, fmt.Errorf("skip BOM: %w", err)
+	switch encoding {
+	case encodingUTF8:
+		if hasBOM {
+			bomBuf := make([]byte, len(utf8BOM))
+			if _, err := io.ReadFull(rs, bomBuf); err != nil {
+				return nil, fmt.Errorf("skip BOM: %w", err)
+			}
 		}
-	}
-	if encoding == "latin-1" {
-		csvReader = newLatin1Reader(csvReader)
+	case encodingUTF16LE, encodingUTF16BE:
+		csvReader = newUTF16Reader(csvReader)
+	case encodingWindows1252:
+		csvReader = newWindows1252Reader(csvReader)
 	}
 
 	result, err := streamAnalyze(ctx, csvReader, delimiter, opts)
@@ -96,8 +105,15 @@ func AnalyzeReader(ctx context.Context, rs io.ReadSeeker, opts *Options) (*Sourc
 	}
 
 	var issues []string
-	if hasBOM {
-		issues = append(issues, "UTF-8 BOM detected and stripped")
+	switch encoding {
+	case encodingUTF8:
+		if hasBOM {
+			issues = append(issues, "UTF-8 BOM detected and stripped")
+		}
+	case encodingUTF16LE:
+		issues = append(issues, "UTF-16 LE BOM detected; input decoded to UTF-8")
+	case encodingUTF16BE:
+		issues = append(issues, "UTF-16 BE BOM detected; input decoded to UTF-8")
 	}
 
 	result.SourceFormat = "csv"
