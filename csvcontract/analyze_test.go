@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -348,7 +349,11 @@ func TestAnalyzeEmptyCSV(t *testing.T) {
 			{Name: "City", DataType: profile.TypeEmpty, Profile: profile.FieldProfile{TopValues: []ct.TopValue{}}},
 		},
 		SampleData: nil,
-		Issues:     nil,
+		// Issue #81: with no data rows, no column class can anchor the
+		// header verdict, so the contract discloses the guess.
+		Issues: []string{
+			"header detection fell back to the all-text guess: a text header over text columns and headerless text data are indistinguishable, so the first row was assumed to be a header",
+		},
 	})
 }
 
@@ -393,7 +398,92 @@ func TestAnalyzeMixedTypes(t *testing.T) {
 			{"4", "", "2024-01-18", ""},
 			{"5", "500", "2024-01-19", "fifth entry"},
 		},
-		Issues: nil,
+		// Issue #81: text columns dominated by a single non-text class
+		// now disclose their split instead of reading like prose.
+		Issues: []string{
+			`column "Value": typed text but 75 percent of its 4 non-empty values are numeric (75 percent numeric, 25 percent text)`,
+			`column "Date": typed text but 80 percent of its 5 non-empty values are date (80 percent date, 20 percent text)`,
+		},
+	})
+}
+
+// TestAnalyzeRaggedRows pins the issue #81 disclosure for rows that do
+// not match the schema width: short rows read as nulls, and cells
+// beyond the schema are dropped outright, so the contract must say so.
+func TestAnalyzeRaggedRows(t *testing.T) {
+	contract, err := AnalyzeFile(ctx, "testdata/ragged.csv", nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	assertIssues(t, contract.Issues, []string{
+		"2 rows had fewer than 3 columns; missing cells were read as nulls",
+		"2 rows had more than 3 columns; 3 extra cells were dropped",
+	})
+
+	// The padded nulls land in the profile: Score is missing in both
+	// short rows, Name in one.
+	if got := contract.Fields[2].Profile.NullCount; got != 2 {
+		t.Errorf("Score null_count = %d, want 2", got)
+	}
+	if got := contract.Fields[1].Profile.NullCount; got != 1 {
+		t.Errorf("Name null_count = %d, want 1", got)
+	}
+}
+
+// TestAnalyzeSentinelNulls pins the issue #81 disclosure for columns
+// whose values include the common null sentinels. The values stay
+// profiled as ordinary values (reclassifying them would silently change
+// the contract's semantics); the issue names the column and sentinels.
+func TestAnalyzeSentinelNulls(t *testing.T) {
+	contract, err := AnalyzeFile(ctx, "testdata/sentinels.csv", nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	assertIssues(t, contract.Issues, []string{
+		`column "Price": 3 of 6 non-null values are null sentinels (-, N/A, NULL); they were profiled as ordinary values`,
+	})
+
+	// Not reclassified: the sentinels still count as non-null values.
+	if got := contract.Fields[2].Profile.NullCount; got != 0 {
+		t.Errorf("Price null_count = %d, want 0 (sentinels are not silently nulled)", got)
+	}
+}
+
+// TestAnalyzeSentinelsBelowFloor pins the noise floor: a single stray
+// sentinel in a large text column is not worth an issue.
+func TestAnalyzeSentinelsBelowFloor(t *testing.T) {
+	var buf bytes.Buffer
+	buf.WriteString("ID,Comment\n")
+	for i := 0; i < 24; i++ {
+		fmt.Fprintf(&buf, "%d,note about item %02d\n", i+1, i+1)
+	}
+	buf.WriteString("25,-\n")
+
+	contract, err := AnalyzeReader(ctx, bytes.NewReader(buf.Bytes()), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	// 1 of 25 non-null values (4 percent) is below the 5 percent floor.
+	assertIssues(t, contract.Issues, nil)
+}
+
+// TestAnalyzeAllTextHeaderGuess pins the issue #81 disclosure for the
+// documented all-text header fallback: nothing distinguishes a text
+// header from headerless text data, and the contract previously
+// expressed full confidence anyway.
+func TestAnalyzeAllTextHeaderGuess(t *testing.T) {
+	contract, err := AnalyzeFile(ctx, "testdata/all_text.csv", nil)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	if !contract.HasHeader {
+		t.Error("has_header = false, want true (the historical guess)")
+	}
+	assertIssues(t, contract.Issues, []string{
+		"header detection fell back to the all-text guess: a text header over text columns and headerless text data are indistinguishable, so the first row was assumed to be a header",
 	})
 }
 
@@ -843,6 +933,47 @@ func TestAnalyzeReaderEmpty(t *testing.T) {
 	_, err := AnalyzeReader(ctx, r, nil)
 	if err == nil {
 		t.Fatal("expected error for empty content")
+	}
+	// Issue #81: only a clean EOF may report emptiness; the message is
+	// pinned so a read failure can never masquerade as an empty file.
+	if err.Error() != "file is empty" {
+		t.Errorf("error = %q, want %q", err.Error(), "file is empty")
+	}
+}
+
+// failingReadSeeker simulates a source that dies after the encoding
+// sniff: the sniff read sees a clean EOF, but every read in the
+// streaming phase fails.
+type failingReadSeeker struct{ sniffed bool }
+
+func (f *failingReadSeeker) Read(p []byte) (int, error) {
+	if !f.sniffed {
+		return 0, io.EOF
+	}
+	return 0, errors.New("disk read failure")
+}
+
+func (f *failingReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	f.sniffed = true
+	return 0, nil
+}
+
+// TestAnalyzeFirstRowReadError pins that a failing first read surfaces
+// the real error instead of being swallowed behind "file is empty"
+// (issue #81).
+func TestAnalyzeFirstRowReadError(t *testing.T) {
+	_, err := AnalyzeReader(ctx, &failingReadSeeker{}, nil)
+	if err == nil {
+		t.Fatal("expected error for failing reader")
+	}
+	if !strings.Contains(err.Error(), "read first row") {
+		t.Errorf("error = %q, want it to be wrapped as a first-row read error", err.Error())
+	}
+	if !strings.Contains(err.Error(), "disk read failure") {
+		t.Errorf("error = %q, want it to carry the underlying cause", err.Error())
+	}
+	if strings.Contains(err.Error(), "file is empty") {
+		t.Errorf("error = %q, must not claim the file is empty", err.Error())
 	}
 }
 
