@@ -265,6 +265,13 @@ func TestParseNumeric(t *testing.T) {
 		{"1,234.56", 1234.56, true},
 		{"1.234,56", 1234.56, true},
 		{"1,234", 1234, true},
+		{"1,234,567", 1234567, true},
+		{"10,5", 10.5, true},
+		{"9,25", 9.25, true},
+		{"2,75", 2.75, true},
+		{"-10,5", -10.5, true},
+		{"1,2345", 1.2345, true},
+		{"1,23,456", 0, false},
 		{"abc", 0, false},
 		{"", 0, false},
 		{"  ", 0, false},
@@ -284,6 +291,55 @@ func TestParseNumeric(t *testing.T) {
 		if ok && got != tt.want {
 			t.Errorf("ParseNumeric(%q) = %f, want %f", tt.input, got, tt.want)
 		}
+	}
+}
+
+// TestParseNumericAgreesWithIsNumeric pins that classification and
+// parsing accept the same comma forms, so a column classified numeric
+// never contains values the range tracker cannot parse (full
+// reconciliation across all forms is issue #80).
+func TestParseNumericAgreesWithIsNumeric(t *testing.T) {
+	inputs := []string{
+		"10,5", "9,25", "2,75", "-10,5", "12,34", "1,2345",
+		"1,234", "1,234,567", "1,23,456", "1,234.56", "5,", ",5",
+	}
+	for _, in := range inputs {
+		_, parseOK := ParseNumeric(in)
+		classifyOK := IsNumeric(in)
+		if parseOK != classifyOK {
+			t.Errorf("disagreement on %q: ParseNumeric ok = %v, IsNumeric = %v", in, parseOK, classifyOK)
+		}
+	}
+}
+
+func TestRangeTrackerEuropeanDecimalComma(t *testing.T) {
+	// Issue #79 reproduction: Swedish prices with decimal commas. The
+	// raw spellings are preserved while comparison is numeric, so the
+	// range no longer inverts (10,5 must not parse as 105).
+	var tracker RangeTracker
+	for _, v := range []string{"10,5", "9,25", "2,75"} {
+		tracker.Observe(v)
+	}
+	if tracker.Min() != "2,75" {
+		t.Errorf("min = %q, want \"2,75\"", tracker.Min())
+	}
+	if tracker.Max() != "10,5" {
+		t.Errorf("max = %q, want \"10,5\"", tracker.Max())
+	}
+}
+
+func TestRangeTrackerMixedCommaConventions(t *testing.T) {
+	// A column mixing conventions keeps whatever each value says:
+	// "10,5" reads as 10.5 (decimal comma) while "1,234" reads as 1234
+	// (well-formed US thousands), so 1,234 is the maximum.
+	var tracker RangeTracker
+	tracker.Observe("10,5")
+	tracker.Observe("1,234")
+	if tracker.Min() != "10,5" {
+		t.Errorf("min = %q, want \"10,5\"", tracker.Min())
+	}
+	if tracker.Max() != "1,234" {
+		t.Errorf("max = %q, want \"1,234\"", tracker.Max())
 	}
 }
 

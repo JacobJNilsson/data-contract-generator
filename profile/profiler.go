@@ -191,6 +191,19 @@ func IsNull(v string) bool {
 
 // ParseNumeric attempts to parse a string as a float64, handling both
 // US (1,234.56) and European (1.234,56) number formats.
+//
+// Comma-only values (commas, no dots) are disambiguated by shape, since
+// the profiler has no file-level context such as the delimiter:
+//   - A well-formed thousands pattern (1,234 or 1,234,567) keeps US
+//     thousands semantics, so "1,234" alone stays 1234.
+//   - Any other single-comma form (10,5 / 9,25) is treated as a decimal
+//     comma, the common European spelling, so "10,5" is 10.5.
+//
+// The residual ambiguity is real: "1,234" in a Swedish file is still
+// read as one thousand two hundred thirty-four, and a column mixing
+// both conventions keeps whatever each individual value says. IsNumeric
+// accepts exactly the same comma-only forms, so classification and
+// range tracking agree.
 func ParseNumeric(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	s = strings.Trim(s, "\"")
@@ -237,12 +250,21 @@ func ParseNumeric(s string) (float64, bool) {
 			}
 		}
 	case hasComma:
-		// Could be US thousands (1,234) or European decimal (1,5).
-		// Remove commas and parse.
-		cleaned := strings.ReplaceAll(core, ",", "")
-		if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
-			result = f
-			parsed = true
+		switch {
+		case IsUSThousandsOnly(core):
+			// Well-formed US thousands: 1,234 or 1,234,567.
+			cleaned := strings.ReplaceAll(core, ",", "")
+			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
+				result = f
+				parsed = true
+			}
+		case IsEuropeanDecimalOnly(core):
+			// Decimal comma: 10,5 means 10.5.
+			cleaned := strings.Replace(core, ",", ".", 1)
+			if f, err := strconv.ParseFloat(cleaned, 64); err == nil {
+				result = f
+				parsed = true
+			}
 		}
 	}
 
