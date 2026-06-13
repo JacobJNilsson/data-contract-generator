@@ -124,6 +124,10 @@ func TestColumnProfilerCapped(t *testing.T) {
 	if result.DistinctCount != 3 {
 		t.Errorf("distinct_count = %d, want 3", result.DistinctCount)
 	}
+	// Crossing the cap is surfaced: distinct_count is a floor, not exact.
+	if !result.DistinctCountCapped {
+		t.Error("distinct_count_capped = false, want true after crossing the cap")
+	}
 	// "a" should have count 2, "b" and "c" have count 1.
 	// "d" should not appear.
 	found := map[string]int{}
@@ -135,6 +139,22 @@ func TestColumnProfilerCapped(t *testing.T) {
 	}
 	if _, ok := found["d"]; ok {
 		t.Error("d should not be tracked")
+	}
+}
+
+func TestColumnProfilerNotCapped(t *testing.T) {
+	// Exactly maxTracked distinct values: every value was tracked, so the
+	// distinct count is exact and the capped flag stays false.
+	p := NewColumnProfiler(3)
+	for _, v := range []string{"a", "b", "c", "a"} {
+		p.Observe(v)
+	}
+	result := p.Finish(10)
+	if result.DistinctCount != 3 {
+		t.Errorf("distinct_count = %d, want 3", result.DistinctCount)
+	}
+	if result.DistinctCountCapped {
+		t.Error("distinct_count_capped = true, want false when the cap was never exceeded")
 	}
 }
 
