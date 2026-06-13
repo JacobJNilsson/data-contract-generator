@@ -74,6 +74,28 @@ func TestVerifySourceValid_JSON(t *testing.T) {
 	}
 }
 
+// TestVerifySourceValid_NewTypeVocabulary pins that the boolean and
+// timestamp field types emitted since issue #80 verify as valid source
+// data types.
+func TestVerifySourceValid_NewTypeVocabulary(t *testing.T) {
+	data := `{
+		"contract_type": "source",
+		"source_format": "csv",
+		"delimiter": ",",
+		"has_header": true,
+		"total_rows": 2,
+		"fields": [
+			{"name": "active", "data_type": "boolean", "profile": {"total_count": 2, "null_count": 0, "null_percentage": 0, "top_values": []}},
+			{"name": "logged_at", "data_type": "timestamp", "profile": {"total_count": 2, "null_count": 0, "null_percentage": 0, "top_values": []}}
+		],
+		"sample_data": []
+	}`
+	r := Verify([]byte(data))
+	if !r.Valid {
+		t.Errorf("expected valid source with boolean and timestamp fields, got issues: %v", r.Issues)
+	}
+}
+
 func TestVerifySourceValid_NDJSON(t *testing.T) {
 	data := `{
 		"contract_type": "source",

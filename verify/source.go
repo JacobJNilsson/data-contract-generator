@@ -46,8 +46,9 @@ var validSourceFormats = map[string]bool{
 
 // Valid data types for source fields.
 var validSourceDataTypes = map[string]bool{
-	"text": true, "numeric": true, "date": true, "boolean": true,
-	"object": true, "array": true, "null": true, "empty": true,
+	"text": true, "numeric": true, "date": true, "timestamp": true,
+	"boolean": true, "object": true, "array": true, "null": true,
+	"empty": true,
 }
 
 // verifySource validates a source contract (CSV, JSON, NDJSON).

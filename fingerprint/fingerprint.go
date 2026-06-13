@@ -304,7 +304,7 @@ func mapDataType(dataType string) (CanonicalType, error) {
 		return TypeBinary, nil
 	case "numeric", "integer":
 		return TypeNumber, nil
-	case "date", "timestamptz":
+	case "date", "timestamp", "timestamptz":
 		return TypeTemporal, nil
 	case "boolean":
 		return TypeBoolean, nil
