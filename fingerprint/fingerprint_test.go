@@ -574,3 +574,59 @@ func TestNestedArrayTypes(t *testing.T) {
 		t.Errorf("array element type change did not change hash")
 	}
 }
+
+// TestGoldenHashUnchangedByNewTypes pins the exact hash of a fingerprint
+// built from the pre-issue-#80 analyzer vocabulary (text, numeric, date,
+// empty). The golden value was computed on main before the boolean and
+// timestamp classes existed: extending the vocabulary must not perturb
+// the canonical identity of existing types, or every cached pipeline
+// would silently miss.
+func TestGoldenHashUnchangedByNewTypes(t *testing.T) {
+	o := mustCSV(t, csvContract(
+		csvField("name", profile.TypeText),
+		csvField("amount", profile.TypeNumeric),
+		csvField("created", profile.TypeDate),
+		csvField("notes", profile.TypeEmpty),
+	))
+	const golden = "fp1:8d72fc9034b5e5e5d641001cc648259d04b370831960dfd433d3dabc6ca2acf9"
+	if got := o.Hash(); got != golden {
+		t.Errorf("hash = %s, want golden %s", got, golden)
+	}
+	const goldenBytes = `{"algo_version":"fp1","fields":[{"name":"amount","type":"NUMBER"},{"name":"created","type":"TEMPORAL"},{"name":"name","type":"STRING"},{"name":"notes","type":"UNKNOWN"}],"format":"csv","nesting":null,"parse_profile":{"delimiter":",","encoding":"utf-8","has_header":true}}`
+	if got := string(o.CanonicalBytes()); got != goldenBytes {
+		t.Errorf("canonical bytes = %s, want %s", got, goldenBytes)
+	}
+}
+
+// TestNewAnalyzerTypesMap pins the issue #80 vocabulary extension:
+// timestamp joins date under the spec's deliberate TEMPORAL collapse,
+// and boolean maps to BOOLEAN.
+func TestNewAnalyzerTypesMap(t *testing.T) {
+	o := mustCSV(t, csvContract(
+		csvField("active", profile.TypeBoolean),
+		csvField("logged_at", profile.TypeTimestamp),
+	))
+	want := []Field{
+		{Name: "active", Type: TypeBoolean},
+		{Name: "logged_at", Type: TypeTemporal},
+	}
+	if len(o.Fields) != len(want) {
+		t.Fatalf("fields = %v, want %v", o.Fields, want)
+	}
+	for i := range want {
+		if o.Fields[i] != want[i] {
+			t.Errorf("fields[%d] = %v, want %v", i, o.Fields[i], want[i])
+		}
+	}
+
+	// The collapse is deliberate: a date column and a timestamp column
+	// share TEMPORAL identity, so refining date to timestamp does not
+	// invalidate a cached pipeline.
+	asDate := mustCSV(t, csvContract(
+		csvField("active", profile.TypeBoolean),
+		csvField("logged_at", profile.TypeDate),
+	))
+	if o.Hash() != asDate.Hash() {
+		t.Errorf("timestamp and date should share TEMPORAL identity: %s vs %s", o.Hash(), asDate.Hash())
+	}
+}
