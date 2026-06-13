@@ -68,14 +68,15 @@ func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 	}
 
 	return FieldProfile{
-		TotalCount:     p.totalCount,
-		NullCount:      p.nullCount,
-		NullPercentage: nullPct,
-		DistinctCount:  len(p.freqs),
-		MinValue:       minVal,
-		MaxValue:       maxVal,
-		TopValues:      p.topValues(topN),
-		Shape:          p.shape.signature(),
+		TotalCount:          p.totalCount,
+		NullCount:           p.nullCount,
+		NullPercentage:      nullPct,
+		DistinctCount:       len(p.freqs),
+		DistinctCountCapped: p.capped,
+		MinValue:            minVal,
+		MaxValue:            maxVal,
+		TopValues:           p.topValues(topN),
+		Shape:               p.shape.signature(),
 	}
 }
 

@@ -543,6 +543,49 @@ func TestAnalyzeContractJSON(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDistinctCapSurfacedInJSON(t *testing.T) {
+	// The ID column has 5 distinct values, crossing MaxTracked=3, so its
+	// distinct count is a floor and must be flagged. The Status column
+	// stays under the cap and must not be flagged.
+	data := []byte("ID,Status\n1,ok\n2,ok\n3,ok\n4,ok\n5,ok\n")
+	contract, err := AnalyzeReader(ctx, bytes.NewReader(data), &Options{MaxTracked: 3})
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+
+	id := contract.Fields[0].Profile
+	if !id.DistinctCountCapped {
+		t.Error("ID distinct_count_capped = false, want true")
+	}
+	if id.DistinctCount != 3 {
+		t.Errorf("ID distinct_count = %d, want floor 3", id.DistinctCount)
+	}
+
+	status := contract.Fields[1].Profile
+	if status.DistinctCountCapped {
+		t.Error("Status distinct_count_capped = true, want false")
+	}
+	if status.DistinctCount != 1 {
+		t.Errorf("Status distinct_count = %d, want 1", status.DistinctCount)
+	}
+
+	// The orchestrator consumes the marshalled contract, so the new key
+	// must be present in the JSON output for capped and uncapped fields.
+	out, err := json.Marshal(contract)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if n := strings.Count(string(out), `"distinct_count_capped":`); n != 2 {
+		t.Errorf("distinct_count_capped key count = %d, want 2 (json: %s)", n, out)
+	}
+	if !strings.Contains(string(out), `"distinct_count_capped":true`) {
+		t.Errorf("expected a capped field in json: %s", out)
+	}
+	if !strings.Contains(string(out), `"distinct_count_capped":false`) {
+		t.Errorf("expected an uncapped field in json: %s", out)
+	}
+}
+
 func TestAnalyzeSingleRowNoHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "single.csv")
@@ -1050,6 +1093,9 @@ func assertProfile(t *testing.T, prefix string, got, want profile.FieldProfile) 
 	}
 	if got.NullPercentage != want.NullPercentage {
 		t.Errorf("%s: null_percentage = %f, want %f", prefix, got.NullPercentage, want.NullPercentage)
+	}
+	if got.DistinctCountCapped != want.DistinctCountCapped {
+		t.Errorf("%s: distinct_count_capped = %v, want %v", prefix, got.DistinctCountCapped, want.DistinctCountCapped)
 	}
 	assertStringPtr(t, prefix+": min_value", got.MinValue, want.MinValue)
 	assertStringPtr(t, prefix+": max_value", got.MaxValue, want.MaxValue)

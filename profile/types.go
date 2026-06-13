@@ -19,14 +19,29 @@ const (
 // TotalCount tracks the number of rows observed (used internally by
 // profilers). Callers map this to contract.FieldProfile.SampleSize.
 type FieldProfile struct {
-	TotalCount     int                 `json:"total_count"`
-	NullCount      int                 `json:"null_count"`
-	NullPercentage float64             `json:"null_percentage"`
-	DistinctCount  int                 `json:"distinct_count"`
-	MinValue       *string             `json:"min_value"`
-	MaxValue       *string             `json:"max_value"`
-	TopValues      []contract.TopValue `json:"top_values"`
-	Shape          ShapeSignature      `json:"shape"`
+	TotalCount     int     `json:"total_count"`
+	NullCount      int     `json:"null_count"`
+	NullPercentage float64 `json:"null_percentage"`
+
+	// DistinctCount is the number of distinct non-null values tracked.
+	// When DistinctCountCapped is true, tracking stopped at the
+	// MaxTracked limit and DistinctCount means "at least this many".
+	DistinctCount int `json:"distinct_count"`
+
+	// DistinctCountCapped is true when the column had more distinct
+	// values than MaxTracked, so DistinctCount is a floor rather than
+	// an exact count.
+	DistinctCountCapped bool    `json:"distinct_count_capped"`
+	MinValue            *string `json:"min_value"`
+	MaxValue            *string `json:"max_value"`
+
+	// TopValues lists the most frequent tracked values. When
+	// DistinctCountCapped is true these can be stale: values first seen
+	// after the cap was reached are never counted, so a genuinely
+	// frequent late-arriving value may be missing and the reported
+	// counts only cover tracked values.
+	TopValues []contract.TopValue `json:"top_values"`
+	Shape     ShapeSignature      `json:"shape"`
 }
 
 // Options controls the analysis behavior. A nil Options uses defaults.
