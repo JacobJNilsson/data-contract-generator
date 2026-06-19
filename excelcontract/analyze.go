@@ -162,13 +162,14 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) (*contract.Sche
 			DataType: string(colTypes[i]),
 			Nullable: fp.NullCount > 0,
 			Profile: &contract.FieldProfile{
-				NullCount:      fp.NullCount,
-				NullPercentage: fp.NullPercentage,
-				DistinctCount:  fp.DistinctCount,
-				MinValue:       fp.MinValue,
-				MaxValue:       fp.MaxValue,
-				TopValues:      fp.TopValues,
-				SampleSize:     fp.TotalCount,
+				NullCount:           fp.NullCount,
+				NullPercentage:      fp.NullPercentage,
+				DistinctCount:       fp.DistinctCount,
+				DistinctCountCapped: fp.DistinctCountCapped,
+				MinValue:            fp.MinValue,
+				MaxValue:            fp.MaxValue,
+				TopValues:           fp.TopValues,
+				SampleSize:          fp.TotalCount,
 			},
 		}
 	}

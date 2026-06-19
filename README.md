@@ -72,8 +72,10 @@ The pre-commit hook runs `make check` which enforces:
 ## Architecture
 
 ```
-contract/        ← shared types (single source of truth)
+contract/        ← shared schema types (DataContract, SchemaContract, FieldProfile)
+profile/         ← shared profiling core: type classification, column profiling, value-shape signatures
 csvcontract/     ← CSV source analysis
+excelcontract/   ← Excel (.xlsx) source analysis
 jsoncontract/    ← JSON/NDJSON source analysis
 apicontract/     ← REST API analysis (OpenAPI/Swagger)
 pgcontract/      ← PostgreSQL analysis
@@ -83,4 +85,4 @@ transform/       ← field mapping suggestions
 fingerprint/     ← structural identity for the pipeline cache
 ```
 
-No circular dependencies. No type aliases. Each analyzer imports `contract/` for shared types and stdlib for everything else (except `pgcontract` which uses `pgx`).
+The schema-style analyzers (`excelcontract`, `pgcontract`, `apicontract`, `supacontract`) emit `contract.DataContract`. The CSV and JSON analyzers emit their own `SourceContract` shapes rather than the shared type, so `contract/` is the shared type set for the schema analyzers, not a single source of truth across every package. `csvcontract` and `excelcontract` share the `profile/` core; `jsoncontract` carries its own profiling and is a known divergence. No circular dependencies.

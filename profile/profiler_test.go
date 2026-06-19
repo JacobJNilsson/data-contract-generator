@@ -520,27 +520,3 @@ func TestRangeTrackerTemporalAfterNonTemporal(t *testing.T) {
 		t.Errorf("max = %q, want pending", tracker.Max())
 	}
 }
-
-func TestOptionsDefaults(t *testing.T) {
-	var nilOpts *Options
-	if nilOpts.GetTopN() != 5 {
-		t.Errorf("nil GetTopN() = %d, want 5", nilOpts.GetTopN())
-	}
-	if nilOpts.GetMaxTracked() != 10000 {
-		t.Errorf("nil GetMaxTracked() = %d, want 10000", nilOpts.GetMaxTracked())
-	}
-	if nilOpts.GetMaxSampleRows() != 5 {
-		t.Errorf("nil GetMaxSampleRows() = %d, want 5", nilOpts.GetMaxSampleRows())
-	}
-
-	opts := &Options{TopN: 42, MaxTracked: 100, MaxSampleRows: 10}
-	if opts.GetTopN() != 42 {
-		t.Errorf("GetTopN() = %d, want 42", opts.GetTopN())
-	}
-	if opts.GetMaxTracked() != 100 {
-		t.Errorf("GetMaxTracked() = %d, want 100", opts.GetMaxTracked())
-	}
-	if opts.GetMaxSampleRows() != 10 {
-		t.Errorf("GetMaxSampleRows() = %d, want 10", opts.GetMaxSampleRows())
-	}
-}

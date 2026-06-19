@@ -40,13 +40,18 @@ type FieldDefinition struct {
 // FieldProfile contains statistical observations about a field's values,
 // computed from a bounded sample.
 type FieldProfile struct {
-	NullCount      int        `json:"null_count"`
-	NullPercentage float64    `json:"null_percentage"`
-	DistinctCount  int        `json:"distinct_count"`
-	MinValue       *string    `json:"min_value"`
-	MaxValue       *string    `json:"max_value"`
-	TopValues      []TopValue `json:"top_values,omitempty"`
-	SampleSize     int        `json:"sample_size"`
+	NullCount      int     `json:"null_count"`
+	NullPercentage float64 `json:"null_percentage"`
+	DistinctCount  int     `json:"distinct_count"`
+	// DistinctCountCapped is true when distinct tracking hit its cap, so
+	// DistinctCount is a floor ("at least this many") rather than exact
+	// and TopValues may be stale. Mirrors profile.FieldProfile's flag so
+	// the shared contract type carries the same honesty as the CSV path.
+	DistinctCountCapped bool       `json:"distinct_count_capped"`
+	MinValue            *string    `json:"min_value"`
+	MaxValue            *string    `json:"max_value"`
+	TopValues           []TopValue `json:"top_values,omitempty"`
+	SampleSize          int        `json:"sample_size"`
 }
 
 // TopValue pairs a value with how many times it appears.
