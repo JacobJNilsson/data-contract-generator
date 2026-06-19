@@ -12,8 +12,8 @@ sd ready        # Find unblocked work
 
 ## Project Rules
 
-- **Go conventions**: Prefer stdlib, remove dead code, no type aliases, no circular dependencies. External deps: pgx/v5, golang.org/x/text, excelize/v2.
-- **Testing**: Per-package coverage gates (csv/verify/transform/profile 100%, json/api/supa/excel 95%, pg 85%). Compare complete objects in tests. Race detector on all runs.
+- **Go conventions**: Prefer stdlib, remove dead code, no type aliases, no circular dependencies. External deps: golang.org/x/text, excelize/v2.
+- **Testing**: Per-package coverage gates (profile/csv/fingerprint 100%, json/excel 95%). Compare complete objects in tests. Race detector on all runs.
 - **Pre-commit**: Runs `make check` (tidy, vet, lint, per-package coverage, build). All must pass.
 - **Commits**: Conventional Commits format (`<type>[optional scope]: <description>`). Imperative mood, start capitalized, no trailing period.
 - **All changes go through PRs.** Never push directly to main.
@@ -22,17 +22,15 @@ sd ready        # Find unblocked work
 ## Architecture
 
 ```
-contract/        <- shared types (single source of truth)
-profile/         <- shared type classification and column profiling
-csvcontract/     <- CSV source analysis
-jsoncontract/    <- JSON/NDJSON source analysis
-excelcontract/   <- Excel (.xlsx) source analysis
-apicontract/     <- REST API analysis (OpenAPI/Swagger)
-pgcontract/      <- PostgreSQL analysis (real Postgres in tests)
-supacontract/    <- Supabase analysis (via PostgREST OpenAPI)
-verify/          <- contract validation
-transform/       <- field mapping suggestions
+contract/        <- shared types for the schema-style path
+profile/         <- shared type classification, column profiling, value-shape signatures
+csvcontract/     <- CSV file analysis
+excelcontract/   <- Excel (.xlsx) file analysis
+jsoncontract/    <- JSON/NDJSON file analysis
+fingerprint/     <- structural identity for the pipeline cache
 ```
+
+The source-analysis (REST/OpenAPI, PostgreSQL, Supabase), verification, and transform-mapping packages were removed when the standalone analysis product was wound down.
 
 ## Cross-Repo Testing
 

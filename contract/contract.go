@@ -1,7 +1,6 @@
 // Package contract defines the shared data contract types used across
-// all analyzers (pgcontract, supacontract, apicontract). A DataContract
-// describes the structure, types, and constraints of any structured
-// data endpoint — databases, APIs, or files.
+// the schema-style analyzers (excelcontract). A DataContract describes
+// the structure, types, and constraints of a structured data source.
 package contract
 
 // DataContract is the complete analysis of a structured data endpoint,
