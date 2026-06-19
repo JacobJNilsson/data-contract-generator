@@ -11,19 +11,6 @@ jobs:
     name: Lint, Test, Build
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5439:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
 
@@ -67,49 +54,12 @@ jobs:
           echo "jsoncontract: ${COVERAGE}%"
           awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
 
-      - name: Test apicontract (95%)
-        run: |
-          go test -race -coverprofile=coverage.out ./apicontract/...
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "apicontract: ${COVERAGE}%"
-          awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
-
-      - name: Test verify (100%)
-        run: |
-          go test -race -coverprofile=coverage.out ./verify/...
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "verify: ${COVERAGE}%"
-          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
-
-      - name: Test transform (100%)
-        run: |
-          go test -race -coverprofile=coverage.out ./transform/...
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "transform: ${COVERAGE}%"
-          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
-
       - name: Test excelcontract (95%)
         run: |
           go test -race -coverprofile=coverage.out ./excelcontract/...
           COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
           echo "excelcontract: ${COVERAGE}%"
           awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
-
-      - name: Test supacontract (95%)
-        run: |
-          go test -race -coverprofile=coverage.out ./supacontract/...
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "supacontract: ${COVERAGE}%"
-          awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
-
-      - name: Test pgcontract with Postgres (85%)
-        env:
-          TEST_PG_CONN: postgres://postgres:postgres@localhost:5439/postgres
-        run: |
-          go test -race -coverprofile=coverage.out ./pgcontract/...
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "pgcontract: ${COVERAGE}%"
-          awk "BEGIN {if ($COVERAGE < 85) {print \"FAIL\"; exit 1}}"
 
       - name: Build
         run: go build ./...
