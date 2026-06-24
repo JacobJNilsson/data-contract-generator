@@ -267,3 +267,81 @@ func TestReadEnumLabelsNonEnum(t *testing.T) {
 		t.Error("non-string label should fail closed")
 	}
 }
+
+func customVal(props []odcs.CustomProperty, key string) (any, bool) {
+	for _, p := range props {
+		if p.Property == key {
+			return p.Value, true
+		}
+	}
+	return nil, false
+}
+
+func TestFromSourceContractCarriesParseFacts(t *testing.T) {
+	sc := csvcontract.SourceContract{
+		SourcePath: "x.csv",
+		Delimiter:  ";",
+		Encoding:   "UTF-8",
+		HasHeader:  true,
+		Fields:     []csvcontract.Field{{Name: "a", DataType: profile.TypeText}},
+	}
+	cp := FromSourceContract(sc).Schema[0].CustomProperties
+	if v, _ := customVal(cp, odcs.CustomKeySourceFormat); v != "csv" {
+		t.Errorf("source format = %v, want csv", v)
+	}
+	if v, _ := customVal(cp, odcs.CustomKeyDelimiter); v != ";" {
+		t.Errorf("delimiter = %v, want ;", v)
+	}
+	if v, _ := customVal(cp, odcs.CustomKeyEncoding); v != "UTF-8" {
+		t.Errorf("encoding = %v", v)
+	}
+	if v, _ := customVal(cp, odcs.CustomKeyHasHeader); v != true {
+		t.Errorf("hasHeader = %v, want true", v)
+	}
+}
+
+func TestFromJSONContractCarriesParseFacts(t *testing.T) {
+	for _, format := range []string{"json", "ndjson"} {
+		sc := jsoncontract.SourceContract{
+			SourcePath:   "x",
+			SourceFormat: format,
+			Encoding:     "UTF-8",
+			Fields:       []jsoncontract.Field{{Name: "a", DataType: jsoncontract.TypeText}},
+		}
+		cp := FromJSONContract(sc).Schema[0].CustomProperties
+		if v, _ := customVal(cp, odcs.CustomKeySourceFormat); v != format {
+			t.Errorf("source format = %v, want %v", v, format)
+		}
+		if _, ok := customVal(cp, odcs.CustomKeyDelimiter); ok {
+			t.Errorf("%s should carry no delimiter", format)
+		}
+	}
+}
+
+func TestFromDataContractFormatMarkers(t *testing.T) {
+	cases := []struct {
+		name     string
+		metadata map[string]any
+		want     string
+	}{
+		{"xlsx", map[string]any{"source_format": "xlsx"}, "xlsx"},
+		{"openapi", map[string]any{"source": "openapi"}, "api"},
+		{"none", nil, ""},
+		{"unknown", map[string]any{"source_format": "weird"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dc := contract.DataContract{
+				ID:       "d",
+				Metadata: c.metadata,
+				Schemas: []contract.SchemaContract{
+					{Name: "S", Fields: []contract.FieldDefinition{{Name: "a", DataType: "text"}}},
+				},
+			}
+			cp := FromDataContract(dc).Schema[0].CustomProperties
+			if v, _ := customVal(cp, odcs.CustomKeySourceFormat); v != c.want {
+				t.Errorf("format = %v, want %v", v, c.want)
+			}
+		})
+	}
+}

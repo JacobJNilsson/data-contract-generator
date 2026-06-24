@@ -27,7 +27,17 @@ func FromSourceContract(sc csvcontract.SourceContract) odcs.Contract {
 	for _, f := range sc.Fields {
 		props = append(props, propertyFromProfileType(f.Name, string(f.DataType)))
 	}
-	return singleObjectContract(sc.SourcePath, sc.SourcePath, props)
+	// Carry the CSV parse facts the fingerprint treats as identity-bearing
+	// (format, delimiter, encoding, header presence). The ODCS column model
+	// has no home for these, so they ride in the schema object's custom
+	// properties; the fingerprint reads them back to stay byte-identical.
+	custom := []odcs.CustomProperty{
+		{Property: odcs.CustomKeySourceFormat, Value: "csv"},
+		{Property: odcs.CustomKeyDelimiter, Value: sc.Delimiter},
+		{Property: odcs.CustomKeyEncoding, Value: sc.Encoding},
+		{Property: odcs.CustomKeyHasHeader, Value: sc.HasHeader},
+	}
+	return singleObjectContract(sc.SourcePath, sc.SourcePath, props, custom)
 }
 
 // FromJSONContract renders a JSON or NDJSON analysis as a single-object
@@ -39,7 +49,15 @@ func FromJSONContract(sc jsoncontract.SourceContract) odcs.Contract {
 	for _, f := range sc.Fields {
 		props = append(props, propertyFromJSONType(f.Name, string(f.DataType)))
 	}
-	return singleObjectContract(sc.SourcePath, sc.SourcePath, props)
+	// JSON and NDJSON parse differently, so the source format is identity-
+	// bearing; encoding is the only parse fact the JSON fingerprint carries
+	// (no delimiter, no header). The format token is echoed verbatim so an
+	// unrecognised value reaches the fingerprint, which fails closed on it.
+	custom := []odcs.CustomProperty{
+		{Property: odcs.CustomKeySourceFormat, Value: sc.SourceFormat},
+		{Property: odcs.CustomKeyEncoding, Value: sc.Encoding},
+	}
+	return singleObjectContract(sc.SourcePath, sc.SourcePath, props, custom)
 }
 
 // FromDataContract renders a multi-schema native contract (an Excel
@@ -50,6 +68,14 @@ func FromJSONContract(sc jsoncontract.SourceContract) odcs.Contract {
 // is left nullable (required unset), one it never saw a null in is marked
 // required.
 func FromDataContract(dc contract.DataContract) odcs.Contract {
+	// The native fingerprint reads the source-format kind from contract
+	// metadata (xlsx -> the Excel format, openapi -> the API format) and
+	// stamps it on every unit. Echo whatever the metadata implies onto each
+	// schema object so the fingerprint recovers the same format token; an
+	// absent or unrecognised marker rides through as an empty token, which
+	// the fingerprint then rejects, matching the native path's refusal to
+	// guess a format.
+	format := dataContractFormat(dc)
 	objects := make([]odcs.SchemaObject, 0, len(dc.Schemas))
 	for _, schema := range dc.Schemas {
 		props := make([]odcs.Property, 0, len(schema.Fields))
@@ -65,7 +91,10 @@ func FromDataContract(dc contract.DataContract) odcs.Contract {
 			Name:         schema.Name,
 			PhysicalName: schema.Name,
 			PhysicalType: "table",
-			Properties:   props,
+			CustomProperties: []odcs.CustomProperty{
+				{Property: odcs.CustomKeySourceFormat, Value: format},
+			},
+			Properties: props,
 		})
 	}
 	return odcs.Contract{
@@ -76,19 +105,36 @@ func FromDataContract(dc contract.DataContract) odcs.Contract {
 	}
 }
 
+// dataContractFormat maps the native contract's metadata markers to the
+// fingerprint source-format token. It mirrors the fingerprint's own
+// dataContractFormat: xlsx metadata is the Excel format, an openapi source
+// is the API format. Anything else yields an empty token, deferring the
+// refusal to the fingerprint so the emitter never invents a format.
+func dataContractFormat(dc contract.DataContract) string {
+	if sf, ok := dc.Metadata["source_format"].(string); ok && sf == "xlsx" {
+		return "xlsx"
+	}
+	if src, ok := dc.Metadata["source"].(string); ok && src == "openapi" {
+		return "api"
+	}
+	return ""
+}
+
 // singleObjectContract wraps one schema object's worth of properties into a
 // contract, the shape the single-table file analysers (CSV, JSON) produce.
-func singleObjectContract(id, name string, props []odcs.Property) odcs.Contract {
+// custom carries the schema object's source-parse facts.
+func singleObjectContract(id, name string, props []odcs.Property, custom []odcs.CustomProperty) odcs.Contract {
 	return odcs.Contract{
 		APIVersion: odcs.APIVersion,
 		Kind:       odcs.KindDataContract,
 		ID:         id,
 		Schema: []odcs.SchemaObject{
 			{
-				Name:         name,
-				PhysicalName: name,
-				PhysicalType: "file",
-				Properties:   props,
+				Name:             name,
+				PhysicalName:     name,
+				PhysicalType:     "file",
+				CustomProperties: custom,
+				Properties:       props,
 			},
 		},
 	}

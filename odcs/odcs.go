@@ -18,15 +18,50 @@ const APIVersion = "v3.1.0"
 // KindDataContract is the only ODCS kind dcg produces.
 const KindDataContract = "DataContract"
 
+// dcg custom-property keys. ODCS carries structure and types, but it has no
+// first-class home for the source-parse facts the fingerprint treats as
+// identity-bearing (the source format kind, and a CSV's delimiter,
+// encoding, and header presence). The emitter writes these into a schema
+// object's customProperties under the keys below, and the fingerprint reads
+// them back, so a fingerprint derived from an ODCS document is byte-
+// identical to one derived from the native contract. They are namespaced
+// with a "dcg" prefix so they never collide with an authored custom
+// property.
+const (
+	// CustomKeySourceFormat carries the fingerprint source-format kind
+	// (csv, json, ndjson, xlsx, api).
+	CustomKeySourceFormat = "dcgSourceFormat"
+	// CustomKeyDelimiter carries a CSV field delimiter.
+	CustomKeyDelimiter = "dcgDelimiter"
+	// CustomKeyEncoding carries a source's character encoding.
+	CustomKeyEncoding = "dcgEncoding"
+	// CustomKeyHasHeader carries whether a CSV had a header row.
+	CustomKeyHasHeader = "dcgHasHeader"
+)
+
+// CustomProp returns the first custom property with the given key, and
+// whether one was present. The lookup is linear because the list is short
+// (a handful of dcg keys) and ODCS stores custom properties as an ordered
+// array, not a map.
+func CustomProp(props []CustomProperty, key string) (any, bool) {
+	for _, p := range props {
+		if p.Property == key {
+			return p.Value, true
+		}
+	}
+	return nil, false
+}
+
 // Contract is a complete ODCS data contract document: the top-level
 // object an ODCS YAML or JSON file deserialises into. Schema holds one
 // SchemaObject per table/section the source exposes.
 type Contract struct {
-	APIVersion string         `json:"apiVersion" yaml:"apiVersion"`
-	Kind       string         `json:"kind" yaml:"kind"`
-	ID         string         `json:"id" yaml:"id"`
-	Version    string         `json:"version,omitempty" yaml:"version,omitempty"`
-	Schema     []SchemaObject `json:"schema,omitempty" yaml:"schema,omitempty"`
+	APIVersion       string           `json:"apiVersion" yaml:"apiVersion"`
+	Kind             string           `json:"kind" yaml:"kind"`
+	ID               string           `json:"id" yaml:"id"`
+	Version          string           `json:"version,omitempty" yaml:"version,omitempty"`
+	Schema           []SchemaObject   `json:"schema,omitempty" yaml:"schema,omitempty"`
+	CustomProperties []CustomProperty `json:"customProperties,omitempty" yaml:"customProperties,omitempty"`
 }
 
 // SchemaObject is one schema in a contract: a table, a view, or a file.
@@ -34,10 +69,25 @@ type Contract struct {
 // the logical typing lives on each Property. PhysicalType is the kind of
 // object (table/view/file), not a column type.
 type SchemaObject struct {
-	Name         string     `json:"name" yaml:"name"`
-	PhysicalName string     `json:"physicalName,omitempty" yaml:"physicalName,omitempty"`
-	PhysicalType string     `json:"physicalType,omitempty" yaml:"physicalType,omitempty"`
-	Properties   []Property `json:"properties,omitempty" yaml:"properties,omitempty"`
+	Name             string           `json:"name" yaml:"name"`
+	PhysicalName     string           `json:"physicalName,omitempty" yaml:"physicalName,omitempty"`
+	PhysicalType     string           `json:"physicalType,omitempty" yaml:"physicalType,omitempty"`
+	Properties       []Property       `json:"properties,omitempty" yaml:"properties,omitempty"`
+	CustomProperties []CustomProperty `json:"customProperties,omitempty" yaml:"customProperties,omitempty"`
+}
+
+// CustomProperty is one ODCS custom key/value pair. ODCS v3.1.0 carries
+// these as an array of objects (not a map) on both the contract root and
+// each schema object. dcg uses them to carry source-parse facts (the
+// source format kind, and a CSV delimiter / encoding / header presence)
+// that the ODCS column model has no first-class home for but the
+// fingerprint needs to stay byte-identical to the native path. Property is
+// the key name; Value is a free-form scalar.
+type CustomProperty struct {
+	Property    string `json:"property" yaml:"property"`
+	Value       any    `json:"value" yaml:"value"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	ID          string `json:"id,omitempty" yaml:"id,omitempty"`
 }
 
 // LogicalType is one of the nine ODCS v3.1.0 logical types. ODCS has no

@@ -20,11 +20,17 @@ func fullContract() Contract {
 		Kind:       KindDataContract,
 		ID:         "orders.public.orders",
 		Version:    "1.0.0",
+		CustomProperties: []CustomProperty{
+			{Property: "dcgSourceFormat", Value: "csv", Description: "the source format kind", ID: "fmt"},
+		},
 		Schema: []SchemaObject{
 			{
 				Name:         "orders",
 				PhysicalName: "orders",
 				PhysicalType: "table",
+				CustomProperties: []CustomProperty{
+					{Property: "dcgDelimiter", Value: ","},
+				},
 				Properties: []Property{
 					{
 						Name:               "id",
@@ -253,5 +259,24 @@ func TestMarshalYAMLParsesBack(t *testing.T) {
 	want := []any{"active", "closed", "pending"}
 	if !reflect.DeepEqual(labels, want) {
 		t.Errorf("validValues = %v, want %v", labels, want)
+	}
+}
+
+func TestCustomProp(t *testing.T) {
+	props := []CustomProperty{
+		{Property: CustomKeySourceFormat, Value: "csv"},
+		{Property: CustomKeyDelimiter, Value: ";"},
+	}
+	if v, ok := CustomProp(props, CustomKeySourceFormat); !ok || v != "csv" {
+		t.Errorf("source format lookup = %v, %v", v, ok)
+	}
+	if v, ok := CustomProp(props, CustomKeyDelimiter); !ok || v != ";" {
+		t.Errorf("delimiter lookup = %v, %v", v, ok)
+	}
+	if _, ok := CustomProp(props, CustomKeyEncoding); ok {
+		t.Error("absent key should report not found")
+	}
+	if _, ok := CustomProp(nil, CustomKeyHasHeader); ok {
+		t.Error("nil props should report not found")
 	}
 }
