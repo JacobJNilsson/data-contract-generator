@@ -3,6 +3,7 @@ module github.com/JacobJNilsson/data-contract-generator
 go 1.25.0
 
 require (
+	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/text v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
