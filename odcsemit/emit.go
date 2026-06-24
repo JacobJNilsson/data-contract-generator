@@ -101,6 +101,7 @@ func FromDataContract(dc contract.DataContract) odcs.Contract {
 		APIVersion: odcs.APIVersion,
 		Kind:       odcs.KindDataContract,
 		ID:         dc.ID,
+		Status:     odcs.StatusActive,
 		Schema:     objects,
 	}
 }
@@ -128,6 +129,7 @@ func singleObjectContract(id, name string, props []odcs.Property, custom []odcs.
 		APIVersion: odcs.APIVersion,
 		Kind:       odcs.KindDataContract,
 		ID:         id,
+		Status:     odcs.StatusActive,
 		Schema: []odcs.SchemaObject{
 			{
 				Name:             name,

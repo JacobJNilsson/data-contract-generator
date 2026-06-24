@@ -18,6 +18,11 @@ const APIVersion = "v3.1.0"
 // KindDataContract is the only ODCS kind dcg produces.
 const KindDataContract = "DataContract"
 
+// StatusActive is the contract lifecycle status the emitter stamps on every
+// document. ODCS v3.1.0 requires a contract-level status; "active" is the
+// truthful value for a contract dcg has just derived and is using.
+const StatusActive = "active"
+
 // dcg custom-property keys. ODCS carries structure and types, but it has no
 // first-class home for the source-parse facts the fingerprint treats as
 // identity-bearing (the source format kind, and a CSV's delimiter,
@@ -56,10 +61,17 @@ func CustomProp(props []CustomProperty, key string) (any, bool) {
 // object an ODCS YAML or JSON file deserialises into. Schema holds one
 // SchemaObject per table/section the source exposes.
 type Contract struct {
-	APIVersion       string           `json:"apiVersion" yaml:"apiVersion"`
-	Kind             string           `json:"kind" yaml:"kind"`
-	ID               string           `json:"id" yaml:"id"`
-	Version          string           `json:"version,omitempty" yaml:"version,omitempty"`
+	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string `json:"kind" yaml:"kind"`
+	ID         string `json:"id" yaml:"id"`
+	Version    string `json:"version,omitempty" yaml:"version,omitempty"`
+	// Status is the ODCS-required contract lifecycle status (for example
+	// StatusActive). ODCS v3.1.0 lists it among the contract's required
+	// properties, so a document that omits it fails official ODCS schema
+	// validation and is rejected by ecosystem tools: the Data Contract CLI
+	// refuses to export a contract without it. The emitter always sets it.
+	// It is unrelated to any column a source happens to name "status".
+	Status           string           `json:"status,omitempty" yaml:"status,omitempty"`
 	Schema           []SchemaObject   `json:"schema,omitempty" yaml:"schema,omitempty"`
 	CustomProperties []CustomProperty `json:"customProperties,omitempty" yaml:"customProperties,omitempty"`
 }
