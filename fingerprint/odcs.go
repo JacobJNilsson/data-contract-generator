@@ -3,6 +3,7 @@ package fingerprint
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/JacobJNilsson/data-contract-generator/odcs"
 )
@@ -176,25 +177,38 @@ func odcsBool(obj odcs.SchemaObject, key string) (bool, error) {
 // rules below do not recognise reaches mapDataType and fails closed there:
 // no silent coercion, the same discipline as the native path.
 func odcsCanonicalToken(p odcs.Property) string {
+	// Native type names arrive through physicalType in whatever case the
+	// producing tool used: pg_dump and "datacontract export odcs" routinely
+	// emit mixed or upper case. Fold before matching so an upper-case BYTEA
+	// or JSONB is recognised rather than silently collapsing to the wrong
+	// canonical type. Silent coercion stays forbidden: an unrecognised
+	// pairing reaches mapDataType and fails closed there.
+	phys := strings.ToLower(strings.TrimSpace(p.PhysicalType))
+
+	// bytea is binary whatever logical type ODCS pairs it with. ODCS has no
+	// binary logical type, so the physical type is authoritative and is
+	// checked here, before the logical-type switch: a tool that types a
+	// bytea column as object/array/etc. still fingerprints it as BINARY
+	// rather than losing the binary distinction.
+	if phys == "bytea" {
+		return "bytea"
+	}
+
 	switch p.LogicalType {
 	case "":
 		// Unobservable column: the analysers carry it as the empty (or, for
 		// JSON, null) token, both of which mapDataType reads as UNKNOWN.
-		switch p.PhysicalType {
+		switch phys {
 		case "empty", "null", "":
 			return "empty"
 		}
-		return p.PhysicalType
+		return phys
 	case odcs.LogicalString:
-		switch p.PhysicalType {
-		case "bytea":
-			// ODCS has no binary logical type, so a string with a bytea
-			// physical type is the binary payload; physicalType overrides.
-			return "bytea"
+		switch phys {
 		case "json", "jsonb":
 			// json/jsonb sometimes rides under a string logical type; it
 			// collapses to OBJECT just like the object logical type.
-			return p.PhysicalType
+			return phys
 		}
 		// uuid and every other string physical type collapse to STRING, the
 		// analyzer "text" token. mapDataType already folds uuid into STRING,
