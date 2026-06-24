@@ -16,6 +16,9 @@ test:
 	go test -race -coverprofile=coverage.out ./odcs/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 100) {printf "FAIL odcs %.1f%% < 100%%\n", $$1; exit 1} else {printf "odcs: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./odcsemit/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL odcsemit %.1f%% < 100%%\n", $$1; exit 1} else {printf "odcsemit: %.1f%%\n", $$1}}'
 	go test -race -coverprofile=coverage.out ./jsoncontract/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 95) {printf "FAIL jsoncontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "jsoncontract: %.1f%%\n", $$1}}'
