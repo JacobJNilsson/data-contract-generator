@@ -575,6 +575,51 @@ func TestNestedArrayTypes(t *testing.T) {
 	}
 }
 
+// TestPostgresTypesMap pins the Postgres source vocabulary extension: the
+// data_type tokens a PostgreSQL/Supabase introspection emits all project
+// onto the canonical lattice rather than failing closed. uuid stays STRING,
+// date and "timestamp without time zone" join the TEMPORAL collapse,
+// "double precision" and real join NUMBER, and both json and jsonb map to
+// OBJECT (dcg only describes data, so json has no equality constraint to
+// exclude it, unlike a delivery client).
+func TestPostgresTypesMap(t *testing.T) {
+	dc := &contract.DataContract{
+		Metadata: map[string]any{"source": "openapi"},
+		Schemas: []contract.SchemaContract{
+			{Name: "public.events", Fields: []contract.FieldDefinition{
+				{Name: "id", DataType: "uuid"},
+				{Name: "happened_on", DataType: "date"},
+				{Name: "happened_at", DataType: "timestamp without time zone"},
+				{Name: "amount", DataType: "double precision"},
+				{Name: "ratio", DataType: "real"},
+				{Name: "payload", DataType: "json"},
+				{Name: "settings", DataType: "jsonb"},
+			}},
+		},
+	}
+	units, skipped, err := FromDataContract(dc)
+	if err != nil {
+		t.Fatalf("FromDataContract: %v", err)
+	}
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped schemas: %v", skipped)
+	}
+	want := map[string]CanonicalType{
+		"id":          TypeString,
+		"happened_on": TypeTemporal,
+		"happened_at": TypeTemporal,
+		"amount":      TypeNumber,
+		"ratio":       TypeNumber,
+		"payload":     TypeObject,
+		"settings":    TypeObject,
+	}
+	for _, f := range units[0].Object.Fields {
+		if want[f.Name] != f.Type {
+			t.Errorf("field %q mapped to %q, want %q", f.Name, f.Type, want[f.Name])
+		}
+	}
+}
+
 // TestGoldenHashUnchangedByNewTypes pins the exact hash of a fingerprint
 // built from the pre-issue-#80 analyzer vocabulary (text, numeric, date,
 // empty). The golden value was computed on main before the boolean and
