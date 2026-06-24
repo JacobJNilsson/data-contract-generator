@@ -295,20 +295,24 @@ func canonicalName(name string) string {
 // share a fingerprint), and a distinction the analyzer exposes is preserved
 // (array element types, binary vs text) rather than coarsened. Only the
 // spec's deliberate collapses apply: int/float to NUMBER, date/timestamp to
-// TEMPORAL, uuid to STRING, jsonb to OBJECT.
+// TEMPORAL, uuid to STRING, json/jsonb to OBJECT. The Postgres source tokens
+// a PostgreSQL/Supabase introspection emits join their canonical siblings:
+// "double precision" and real are NUMBER, "timestamp without time zone" is
+// TEMPORAL, and json maps to OBJECT alongside jsonb (dcg only describes data,
+// so json carries no equality constraint that would exclude it).
 func mapDataType(dataType string) (CanonicalType, error) {
 	switch dataType {
 	case "text", "uuid":
 		return TypeString, nil
 	case "bytea":
 		return TypeBinary, nil
-	case "numeric", "integer":
+	case "numeric", "integer", "real", "double precision":
 		return TypeNumber, nil
-	case "date", "timestamp", "timestamptz":
+	case "date", "timestamp", "timestamptz", "timestamp without time zone":
 		return TypeTemporal, nil
 	case "boolean":
 		return TypeBoolean, nil
-	case "object", "jsonb":
+	case "object", "json", "jsonb":
 		return TypeObject, nil
 	case "array":
 		return TypeArray, nil
