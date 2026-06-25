@@ -152,6 +152,114 @@ func TestFromSQLDDL_Success(t *testing.T) {
 	}
 }
 
+// writeAvro creates an Avro schema file in a temp dir and returns its path.
+func writeAvro(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "schema.avsc")
+	schema := `{"type":"record","name":"Customer","fields":[{"name":"id","type":"long"}]}`
+	if err := os.WriteFile(path, []byte(schema), 0o600); err != nil {
+		t.Fatalf("write avro: %v", err)
+	}
+	return path
+}
+
+func TestFromAvro_Success(t *testing.T) {
+	avro := writeAvro(t)
+	fr := &fakeRunner{outputs: [][]byte{nil, []byte(odcsExport)}}
+	im := New(fr)
+
+	got, err := im.FromAvro(context.Background(), avro)
+	if err != nil {
+		t.Fatalf("FromAvro: %v", err)
+	}
+
+	// The contract is the parsed ODCS export, not the intermediate.
+	if got.APIVersion != "v3.1.0" || got.Kind != "DataContract" {
+		t.Fatalf("contract header = %q/%q, want v3.1.0/DataContract", got.APIVersion, got.Kind)
+	}
+	if len(got.Schema) != 1 || len(got.Schema[0].Properties) != 2 {
+		t.Fatalf("schema = %+v, want one object with 2 properties", got.Schema)
+	}
+
+	// Two steps in order. The import step targets the avro subcommand with
+	// --source and no --dialect (Avro is a single declared format); the
+	// export step reuses the same intermediate path.
+	if len(fr.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(fr.calls))
+	}
+	imp := fr.calls[0]
+	if imp.name != DefaultBinary {
+		t.Fatalf("import binary = %q, want %q", imp.name, DefaultBinary)
+	}
+	wantImportHead := []string{"import", "avro", "--source", avro, "--output"}
+	if !startsWith(imp.args, wantImportHead) {
+		t.Fatalf("import argv = %v, want prefix %v", imp.args, wantImportHead)
+	}
+	// No dialect flag: Avro has only one grammar.
+	for _, a := range imp.args {
+		if a == "--dialect" {
+			t.Fatalf("import argv = %v, want no --dialect for Avro", imp.args)
+		}
+	}
+	intermediate := imp.args[len(imp.args)-1]
+	exp := fr.calls[1]
+	if wantExport := []string{"export", "odcs", intermediate}; !equal(exp.args, wantExport) {
+		t.Fatalf("export argv = %v, want %v", exp.args, wantExport)
+	}
+
+	// The intermediate temp file is cleaned up.
+	if _, statErr := os.Stat(intermediate); !os.IsNotExist(statErr) {
+		t.Fatalf("intermediate %q not removed (stat err %v)", intermediate, statErr)
+	}
+}
+
+func TestFromAvro_EmptyPath(t *testing.T) {
+	im := New(&fakeRunner{})
+	_, err := im.FromAvro(context.Background(), "  ")
+	if err == nil || !strings.Contains(err.Error(), "empty Avro schema path") {
+		t.Fatalf("err = %v, want empty Avro schema path", err)
+	}
+}
+
+func TestFromAvro_MissingFile(t *testing.T) {
+	im := New(&fakeRunner{})
+	_, err := im.FromAvro(context.Background(), filepath.Join(t.TempDir(), "nope.avsc"))
+	if err == nil || !strings.Contains(err.Error(), "Avro schema file") {
+		t.Fatalf("err = %v, want Avro schema file error", err)
+	}
+}
+
+func TestFromAvro_ImportFails(t *testing.T) {
+	// The avro importer is an optional CLI extra; without it the import step
+	// exits non-zero. The error and the CLI's own diagnostics are wrapped.
+	fr := &fakeRunner{
+		failOn:  "import avro",
+		failErr: errors.New("exit status 1"),
+		failOut: []byte("Module avro could not be loaded."),
+	}
+	im := New(fr)
+	_, err := im.FromAvro(context.Background(), writeAvro(t))
+	if err == nil {
+		t.Fatal("want error on import failure")
+	}
+	if !strings.Contains(err.Error(), "exit status 1") || !strings.Contains(err.Error(), "Module avro could not be loaded") {
+		t.Fatalf("err = %v, want wrapped CLI exit and diagnostics", err)
+	}
+	if len(fr.calls) != 1 {
+		t.Fatalf("calls = %d, want 1 (no export after import failure)", len(fr.calls))
+	}
+}
+
+// TestPackageFromAvro covers the package-level convenience, which binds the
+// real execRunner. It is driven down the early validation path (empty path)
+// so no subprocess runs and the test needs no Python toolchain.
+func TestPackageFromAvro_Validates(t *testing.T) {
+	_, err := FromAvro(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "empty Avro schema path") {
+		t.Fatalf("err = %v, want empty Avro schema path", err)
+	}
+}
+
 func TestFromSQLDDL_EmptyPath(t *testing.T) {
 	im := New(&fakeRunner{})
 	_, err := im.FromSQLDDL(context.Background(), "  ", "postgres")
