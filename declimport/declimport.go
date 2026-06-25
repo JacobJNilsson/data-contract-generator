@@ -1,7 +1,7 @@
 // Package declimport imports sources that already carry a declared schema
 // and normalises them into the odcs model. Where the file analysers infer a
-// contract from data, a declared schema (a Postgres DDL dump today; OpenAPI
-// and Avro later) is authoritative, so dcg does not infer it: it shells out
+// contract from data, a declared schema (a Postgres DDL dump or an Avro
+// record schema) is authoritative, so dcg does not infer it: it shells out
 // to the Data Contract CLI and reads the ODCS the CLI emits back into the
 // odcs package (spec section 6, DG-4).
 //
@@ -28,9 +28,13 @@
 // exec.go behind the same interface; a build-tagged integration test drives
 // it against the genuine binary.
 //
-// OpenAPI and Avro are deliberate follow-ups: they reuse importToODCS with a
-// different import subcommand and no dialect, so the seam is already shaped
-// for them.
+// Avro reuses the same importToODCS seam with a different import subcommand
+// and no dialect, so SQL and Avro differ only in the import argv. OpenAPI was
+// scoped alongside them, but the pinned Data Contract CLI (1.0.6) ships no
+// OpenAPI importer, and its jsonschema importer does not read an OpenAPI
+// document's components.schemas (it yields an empty model), so there is no
+// faithful OpenAPI path to shell out to yet; the seam is ready for one the
+// day the CLI grows the importer.
 package declimport
 
 import (
@@ -83,6 +87,13 @@ func FromSQLDDL(ctx context.Context, ddlPath, dialect string) (odcs.Contract, er
 	return New(execRunner{}).FromSQLDDL(ctx, ddlPath, dialect)
 }
 
+// FromAvro imports an Avro schema file (a .avsc record schema) into an odcs
+// contract, using the default CLI binary on PATH. It is the package-level
+// convenience over Importer.FromAvro with a real Runner.
+func FromAvro(ctx context.Context, schemaPath string) (odcs.Contract, error) {
+	return New(execRunner{}).FromAvro(ctx, schemaPath)
+}
+
 // FromSQLDDL imports a SQL DDL file into an odcs contract. dialect selects
 // the SQL grammar the CLI parses (for example "postgres"); it is required
 // because the CLI cannot reliably guess it and a wrong dialect parses the
@@ -105,12 +116,37 @@ func (im *Importer) FromSQLDDL(ctx context.Context, ddlPath, dialect string) (od
 	return im.importToODCS(ctx, []string{"import", "sql", "--source", ddlPath, "--dialect", dialect})
 }
 
+// FromAvro imports an Avro schema file into an odcs contract. schemaPath must
+// name a readable Avro schema (an .avsc record definition). Unlike SQL there
+// is no dialect: Avro is a single declared format, so the import step needs
+// only --source. The contract is read from the CLI's own ODCS export, so it
+// is canonical ODCS v3.1.0.
+//
+// The function fails closed: an empty or missing path, a non-zero exit from
+// either CLI step, or output that does not parse as an ODCS contract all
+// return an error and a zero Contract rather than a partial or silently empty
+// result.
+//
+// The Avro importer is an optional extra of the Data Contract CLI; install it
+// with the pinned datacontract-cli[avro] (see tools/import/requirements.txt).
+// Without the extra the import step exits non-zero and that error is wrapped
+// here, so a missing extra surfaces as a clear failure rather than a hang.
+func (im *Importer) FromAvro(ctx context.Context, schemaPath string) (odcs.Contract, error) {
+	if strings.TrimSpace(schemaPath) == "" {
+		return odcs.Contract{}, fmt.Errorf("declimport: empty Avro schema path")
+	}
+	if _, err := os.Stat(schemaPath); err != nil {
+		return odcs.Contract{}, fmt.Errorf("declimport: Avro schema file %q: %w", schemaPath, err)
+	}
+	return im.importToODCS(ctx, []string{"import", "avro", "--source", schemaPath})
+}
+
 // importToODCS runs an import subcommand to an intermediate data contract,
 // then exports that contract to ODCS and parses it. importArgs is the full
 // argv after the binary for the import step, including the source flags; this
 // function appends the --output target and owns the export step, so every
-// declared-schema path (SQL today, OpenAPI/Avro later) shares one import,
-// export, and parse pipeline and differs only in importArgs.
+// declared-schema path (SQL and Avro) shares one import, export, and parse
+// pipeline and differs only in importArgs.
 //
 // The intermediate contract is written to a temp file the function owns and
 // removes, so concurrent imports never collide on a fixed path and nothing
@@ -128,9 +164,9 @@ func (im *Importer) importToODCS(ctx context.Context, importArgs []string) (odcs
 	defer func() { _ = os.Remove(intermediate) }()
 
 	// Copy rather than append onto importArgs: this function is the shared
-	// seam for every declared-schema path (SQL today, OpenAPI/Avro later),
-	// so a future caller that hands in a slice with spare capacity must not
-	// have its backing array overwritten here.
+	// seam for every declared-schema path (SQL and Avro today), so a caller
+	// that hands in a slice with spare capacity must not have its backing
+	// array overwritten here.
 	fullImportArgs := append(append([]string(nil), importArgs...), "--output", intermediate)
 	if out, runErr := im.Runner.Run(ctx, im.Binary, fullImportArgs...); runErr != nil {
 		return odcs.Contract{}, fmt.Errorf("declimport: %s %s: %w: %s",

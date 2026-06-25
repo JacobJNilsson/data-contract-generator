@@ -31,6 +31,23 @@ const sampleDDL = `CREATE TABLE customers (
 );
 `
 
+// sampleAvro is a tiny Avro record schema with a couple of typed fields. The
+// importer's [avro] extra (see tools/import/requirements.txt) must be present
+// for the import step to load; the test skips when the binary is absent and
+// fails loudly if the extra is missing, so a half-installed toolchain is not
+// mistaken for a passing run.
+const sampleAvro = `{
+  "type": "record",
+  "name": "Customer",
+  "namespace": "com.example",
+  "fields": [
+    {"name": "id", "type": "long"},
+    {"name": "email", "type": "string"},
+    {"name": "active", "type": "boolean"}
+  ]
+}
+`
+
 func TestIntegration_FromSQLDDL_Postgres(t *testing.T) {
 	if _, err := exec.LookPath(DefaultBinary); err != nil {
 		t.Skipf("real %q not on PATH; install with `make import-tools` and run `make import-test`", DefaultBinary)
@@ -90,6 +107,62 @@ func TestIntegration_FromSQLDDL_Postgres(t *testing.T) {
 	// The timestamp and boolean columns keep their logical types.
 	if got := byName["created_at"].LogicalType; got != "timestamp" {
 		t.Fatalf("created_at logicalType = %q, want timestamp", got)
+	}
+	if got := byName["active"].LogicalType; got != "boolean" {
+		t.Fatalf("active logicalType = %q, want boolean", got)
+	}
+}
+
+func TestIntegration_FromAvro(t *testing.T) {
+	if _, err := exec.LookPath(DefaultBinary); err != nil {
+		t.Skipf("real %q not on PATH; install with `make import-tools` and run `make import-test`", DefaultBinary)
+	}
+
+	schema := filepath.Join(t.TempDir(), "schema.avsc")
+	if err := os.WriteFile(schema, []byte(sampleAvro), 0o600); err != nil {
+		t.Fatalf("write sample Avro: %v", err)
+	}
+
+	got, err := FromAvro(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("FromAvro against real CLI: %v", err)
+	}
+
+	// A faithful ODCS contract: v3.1.0 header, the record as one schema
+	// object, the typed fields carried through.
+	if got.APIVersion != "v3.1.0" {
+		t.Fatalf("apiVersion = %q, want v3.1.0", got.APIVersion)
+	}
+	if got.Kind != "DataContract" {
+		t.Fatalf("kind = %q, want DataContract", got.Kind)
+	}
+	if len(got.Schema) != 1 {
+		t.Fatalf("schema objects = %d, want 1", len(got.Schema))
+	}
+	rec := got.Schema[0]
+	if rec.Name != "Customer" {
+		t.Fatalf("record name = %q, want Customer", rec.Name)
+	}
+
+	byName := map[string]odcs.Property{}
+	for _, p := range rec.Properties {
+		byName[p.Name] = p
+	}
+	if len(byName) != 3 {
+		t.Fatalf("fields = %d, want 3 (%v)", len(byName), rec.Properties)
+	}
+
+	// The Avro long maps to a logical integer; string and boolean keep their
+	// logical types. A required (non-union) field comes back required.
+	id := byName["id"]
+	if id.LogicalType != "integer" {
+		t.Fatalf("id logicalType = %q, want integer", id.LogicalType)
+	}
+	if id.Required == nil || !*id.Required {
+		t.Fatalf("id required = %v, want true (non-union Avro field)", id.Required)
+	}
+	if got := byName["email"].LogicalType; got != "string" {
+		t.Fatalf("email logicalType = %q, want string", got)
 	}
 	if got := byName["active"].LogicalType; got != "boolean" {
 		t.Fatalf("active logicalType = %q, want boolean", got)

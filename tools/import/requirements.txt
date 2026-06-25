@@ -1,13 +1,18 @@
 # Pinned Python toolchain for the declared-schema importer (declimport).
 #
 # The dcg Go module shells out to the Data Contract CLI to import sources
-# that already carry a schema (a Postgres DDL dump today; OpenAPI and Avro
-# later) and normalise them into the odcs package. The CLI is pinned to an
-# exact version so the importer's argv contract and the ODCS it emits are
+# that already carry a schema (a Postgres DDL dump or an Avro record schema)
+# and normalise them into the odcs package. The CLI is pinned to an exact
+# version so the importer's argv contract and the ODCS it emits are
 # reproducible across machines and CI.
+#
+# The [avro] extra is required: the Avro importer lives behind it, and without
+# it `datacontract import avro` exits non-zero with "Module avro could not be
+# loaded". The SQL importer needs no extra. (The pinned CLI has no OpenAPI
+# importer at all, so there is nothing to install for that format yet.)
 #
 # This toolchain is intentionally NOT installed by `make check`: the Go unit
 # tests run against a fake command runner and need no Python. Install it with
 # `make import-tools`; the build-tagged integration test drives the real
 # binary.
-datacontract-cli==1.0.6
+datacontract-cli[avro]==1.0.6
