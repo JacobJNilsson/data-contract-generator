@@ -1,4 +1,11 @@
-.PHONY: build test lint vet tidy check clean setup
+.PHONY: build test lint vet tidy check clean setup import-tools import-test
+
+# Pinned Python toolchain for the declared-schema importer (declimport).
+# Kept out of `make check` on purpose: the declimport unit tests run against
+# a fake command runner and need no Python. Create the venv and install the
+# pinned Data Contract CLI with `make import-tools`, then drive the real tool
+# end to end with `make import-test`.
+IMPORT_VENV := tools/import/.venv
 
 build:
 	go build ./...
@@ -25,6 +32,9 @@ test:
 	go test -race -coverprofile=coverage.out ./excelcontract/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 95) {printf "FAIL excelcontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "excelcontract: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./declimport/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL declimport %.1f%% < 100%%\n", $$1; exit 1} else {printf "declimport: %.1f%%\n", $$1}}'
 
 lint:
 	golangci-lint run ./...
@@ -39,6 +49,20 @@ check: tidy vet lint test build
 
 setup:
 	git config core.hooksPath .githooks
+
+# Create the importer's venv and install the pinned Data Contract CLI. This
+# is a network install and is deliberately not part of `make check`.
+import-tools:
+	python3 -m venv $(IMPORT_VENV)
+	$(IMPORT_VENV)/bin/pip install --upgrade pip
+	$(IMPORT_VENV)/bin/pip install -r tools/import/requirements.txt
+	@echo "Installed:" && $(IMPORT_VENV)/bin/datacontract --version
+
+# Run the build-tagged integration tests against the real datacontract CLI,
+# putting the venv's bin on PATH so the importer finds the pinned binary. The
+# test skips (does not fail) if the binary is absent.
+import-test:
+	PATH="$(CURDIR)/$(IMPORT_VENV)/bin:$$PATH" go test -tags integration -race ./declimport/...
 
 clean:
 	rm -rf coverage.out
