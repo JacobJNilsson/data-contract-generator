@@ -1,0 +1,13 @@
+# Pinned Python toolchain for the declared-schema importer (declimport).
+#
+# The dcg Go module shells out to the Data Contract CLI to import sources
+# that already carry a schema (a Postgres DDL dump today; OpenAPI and Avro
+# later) and normalise them into the odcs package. The CLI is pinned to an
+# exact version so the importer's argv contract and the ODCS it emits are
+# reproducible across machines and CI.
+#
+# This toolchain is intentionally NOT installed by `make check`: the Go unit
+# tests run against a fake command runner and need no Python. Install it with
+# `make import-tools`; the build-tagged integration test drives the real
+# binary.
+datacontract-cli==1.0.6
