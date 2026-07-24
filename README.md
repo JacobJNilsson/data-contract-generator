@@ -45,22 +45,33 @@ func main() {
 
 ## Development
 
-Requires Go 1.25+ and `golangci-lint`. No Docker needed (the test suite is pure Go).
+Requires Go 1.25+ and `golangci-lint`.
+
+The gate is two-tier:
+
+- **Fast tier (default)** — pure Go, no Docker, no network. This is what `make check` and the pre-commit hook run, and what a contributor needs day to day.
+- **Integration tier** — for destination code that must run against a live Postgres. Gated behind the `integration` build tag so it never touches the fast path, and run separately (in CI, and locally on demand). It needs a Docker daemon (the `internal/pgtest` harness starts a throwaway Postgres via testcontainers) or an existing database via `TEST_PG_CONN`; it skips rather than fails when neither is present.
 
 ```bash
-make setup    # configure git hooks
-make check    # tidy, vet, lint, test, build
+make setup             # configure git hooks
+make check             # fast tier: tidy, vet, lint, test, build (no Docker)
+make integration-test  # integration tier: go test -tags=integration ./... (needs Docker or TEST_PG_CONN)
 ```
 
-The pre-commit hook runs `make check` which enforces:
+The pre-commit hook runs `make check` which enforces per-package coverage:
 
 | Package | Coverage gate |
 |---|---|
 | profile | 100% |
 | csvcontract | 100% |
 | fingerprint | 100% |
+| odcs | 100% |
+| odcsemit | 100% |
+| declimport | 100% |
 | jsoncontract | 95% |
 | excelcontract | 95% |
+
+CI runs the fast tier and the integration tier as separate jobs, so the pure-Go promise holds for the default path while destination code is still covered against a real Postgres.
 
 ## Architecture
 
