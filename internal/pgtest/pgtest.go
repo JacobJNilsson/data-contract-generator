@@ -85,11 +85,6 @@ func Start(ctx context.Context) (*Postgres, error) {
 	}, nil
 }
 
-// DSN is the connection string for the running Postgres, for callers that need
-// to open connections some other way (a pgxpool, a migration tool). Prefer Open
-// for ordinary tests.
-func (p *Postgres) DSN() string { return p.dsn }
-
 // Open returns a *sql.DB against the running Postgres, closed automatically on
 // t.Cleanup. It fails the test rather than returning an error, matching the
 // ergonomics of the library's other test helpers.
