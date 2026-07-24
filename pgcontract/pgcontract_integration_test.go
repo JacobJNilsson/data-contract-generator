@@ -630,6 +630,96 @@ func TestGenerateQueryError(t *testing.T) {
 	}
 }
 
+// TestGenerateResolveEnumLabelsExclusionsAndCaching drives the enum-resolution
+// pass's remaining branches against a real server: an enum column in an
+// EXCLUDED table and an EXCLUDED enum column are both skipped by the pass (no
+// wasted read, and neither reaches the contract), and two columns sharing ONE
+// enum type read that type once (the cache hit) and resolve to the same labels.
+func TestGenerateResolveEnumLabelsExclusionsAndCaching(t *testing.T) {
+	db := pg.Open(t)
+	exec(t, db, `CREATE TYPE status_a AS ENUM ('a1', 'a2')`)
+	exec(t, db, `CREATE TYPE status_b AS ENUM ('b1', 'b2')`)
+	exec(t, db, `CREATE TYPE status_c AS ENUM ('c1', 'c2')`)
+	exec(t, db, `CREATE TABLE enum_excluded_table (id integer PRIMARY KEY, s status_a NOT NULL)`)
+	exec(t, db, `CREATE TABLE enum_excluded_col (id integer PRIMARY KEY, dropme status_b NOT NULL)`)
+	exec(t, db, `CREATE TABLE enum_shared (id integer PRIMARY KEY, first status_c NOT NULL, second status_c NOT NULL)`)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP TABLE IF EXISTS enum_excluded_table, enum_excluded_col, enum_shared`)
+		_, _ = db.ExecContext(context.Background(), `DROP TYPE IF EXISTS status_a, status_b, status_c`)
+	})
+
+	c := generate(t, db, pgcontract.Options{
+		ExcludeTables:  []string{"enum_excluded_table"},
+		ExcludeColumns: []string{"dropme"},
+	})
+
+	// The excluded table never appears, so its enum was skipped in the pass.
+	for _, tbl := range c.Schema {
+		if tbl.Name == "enum_excluded_table" {
+			t.Errorf("excluded enum table leaked")
+		}
+	}
+	// The excluded enum column is gone, but its table remains.
+	colExcluded := tableByName(t, c, "enum_excluded_col")
+	for _, p := range colExcluded.Properties {
+		if p.Name == "dropme" {
+			t.Errorf("excluded enum column dropme leaked")
+		}
+	}
+	// The two columns of one shared enum type both resolve to the same labels.
+	shared := tableByName(t, c, "enum_shared")
+	first := columnByName(t, shared, "first")
+	second := columnByName(t, shared, "second")
+	if !odcsdest.IsEnum(first) || !odcsdest.IsEnum(second) {
+		t.Fatalf("enum_shared columns are not both enums")
+	}
+	if strings.Join(odcsdest.EnumLabels(first), ",") != "c1,c2" || strings.Join(odcsdest.EnumLabels(second), ",") != "c1,c2" {
+		t.Errorf("shared enum labels differ: first=%v second=%v", odcsdest.EnumLabels(first), odcsdest.EnumLabels(second))
+	}
+}
+
+// failEnumQuerier delegates every read to a real *sql.DB EXCEPT the pg_enum
+// label lookup, which it fails with a real error. It exercises the enum-pass
+// error path (a healthy server never fails mid-flow, so this is the only way to
+// reach it) without faking any coverage: the six catalog reads run for real,
+// and only the injected enum failure is synthetic.
+type failEnumQuerier struct {
+	*sql.DB
+	err error
+}
+
+func (f failEnumQuerier) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if strings.Contains(query, "pg_enum") {
+		return nil, f.err
+	}
+	return f.DB.QueryContext(ctx, query, args...)
+}
+
+// TestGenerateEnumLabelQueryError proves the enum-label pass surfaces a genuine
+// query failure (not a fail-closed type error, and never a label-less enum): the
+// six catalog reads succeed against the real server, and the injected pg_enum
+// failure propagates out of Generate tagged with the enum context.
+func TestGenerateEnumLabelQueryError(t *testing.T) {
+	db := pg.Open(t)
+	exec(t, db, `CREATE TYPE boom_status AS ENUM ('x', 'y')`)
+	exec(t, db, `CREATE TABLE enum_boom (id integer PRIMARY KEY, s boom_status NOT NULL)`)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DROP TABLE IF EXISTS enum_boom`)
+		_, _ = db.ExecContext(context.Background(), `DROP TYPE IF EXISTS boom_status`)
+	})
+
+	q := failEnumQuerier{DB: db, err: errors.New("enum boom")}
+	_, err := pgcontract.Generate(context.Background(), q, pgcontract.Options{})
+	if err == nil {
+		t.Fatal("Generate() = nil, want the enum-label query error")
+	}
+	for _, want := range []string{"enum labels", "enum boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
 // TestGenerateEmptyIsInvalid: a database with no included tables yields a
 // fail-closed invalid-contract error, never an empty contract.
 func TestGenerateEmptyIsInvalid(t *testing.T) {
