@@ -61,5 +61,48 @@ jobs:
           echo "excelcontract: ${COVERAGE}%"
           awk "BEGIN {if ($COVERAGE < 95) {print \"FAIL\"; exit 1}}"
 
+      - name: Test odcs (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./odcs/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "odcs: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
+      - name: Test odcsemit (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./odcsemit/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "odcsemit: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
+      # declimport's coverage is measured from its unit tests only; the
+      # end-to-end CLI tests are behind the `integration` tag and excluded here.
+      - name: Test declimport (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./declimport/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "declimport: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
       - name: Build
         run: go build ./...
+
+  integration:
+    name: Integration (Postgres)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The integration tier runs the second, Docker-backed gate separately
+      # from the fast pure-Go job above, so the default developer path stays
+      # Docker-free. ubuntu-latest ships a running Docker daemon, which the
+      # internal/pgtest harness uses to start a throwaway Postgres via
+      # testcontainers. The declimport CLI integration tests share the tag and
+      # skip here (their pinned binary is not installed), which is expected.
+      - name: Integration tests (-tags=integration)
+        run: go test -tags=integration -race ./...
