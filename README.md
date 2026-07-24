@@ -69,11 +69,14 @@ The pre-commit hook runs `make check` which enforces per-package coverage:
 | odcsemit | 100% |
 | odcsdest | 100% |
 | pgcheck | 100% |
+| pgintrospect | 100% |
 | declimport | 100% |
 | jsoncontract | 95% |
 | excelcontract | 95% |
 
-CI runs the fast tier and the integration tier as separate jobs, so the pure-Go promise holds for the default path while destination code is still covered against a real Postgres.
+`pgcontract` is gated at 100% in the INTEGRATION tier instead of the fast tier: its faithful generator (`Generate`) needs a live Postgres, so its full behaviour — the pure assembly/validation core and the live-DB reads alike — is exercised and measured under `-tags=integration` rather than faked to hit a fast-tier number.
+
+CI runs the fast tier and the integration tier as separate jobs, so the pure-Go promise holds for the default path while destination code is still covered against a real Postgres. Both jobs enforce the per-package coverage gates above (the fast tier for the pure packages, the integration tier for `pgcontract`).
 
 ## Architecture
 

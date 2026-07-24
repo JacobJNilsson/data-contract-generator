@@ -75,6 +75,27 @@ jobs:
           echo "odcsemit: ${COVERAGE}%"
           awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
 
+      - name: Test odcsdest (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./odcsdest/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "odcsdest: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
+      - name: Test pgcheck (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./pgcheck/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "pgcheck: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
+      - name: Test pgintrospect (100%)
+        run: |
+          go test -race -coverprofile=coverage.out ./pgintrospect/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "pgintrospect: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
+
       # declimport's coverage is measured from its unit tests only; the
       # end-to-end CLI tests are behind the `integration` tag and excluded here.
       - name: Test declimport (100%)
@@ -106,3 +127,14 @@ jobs:
       # skip here (their pinned binary is not installed), which is expected.
       - name: Integration tests (-tags=integration)
         run: go test -tags=integration -race ./...
+
+      # pgcontract's faithful generator needs a live Postgres, so it is gated
+      # 100% HERE (in the tier that exercises its full behaviour) rather than in
+      # the fast job: the pure assembly/validation core and the live-DB reads
+      # are both measured, with no branch faked to hit the number.
+      - name: Test pgcontract (100%, integration)
+        run: |
+          go test -tags=integration -race -coverprofile=coverage.out ./pgcontract/...
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
+          echo "pgcontract: ${COVERAGE}%"
+          awk "BEGIN {if ($COVERAGE < 100) {print \"FAIL\"; exit 1}}"
