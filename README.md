@@ -67,6 +67,8 @@ The pre-commit hook runs `make check` which enforces per-package coverage:
 | fingerprint | 100% |
 | odcs | 100% |
 | odcsemit | 100% |
+| odcsdest | 100% |
+| pgcheck | 100% |
 | declimport | 100% |
 | jsoncontract | 95% |
 | excelcontract | 95% |
