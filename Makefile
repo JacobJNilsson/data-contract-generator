@@ -32,6 +32,9 @@ test:
 	go test -race -coverprofile=coverage.out ./pgcheck/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 100) {printf "FAIL pgcheck %.1f%% < 100%%\n", $$1; exit 1} else {printf "pgcheck: %.1f%%\n", $$1}}'
+	go test -race -coverprofile=coverage.out ./pgintrospect/...
+	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
+		awk '{if ($$1+0 < 100) {printf "FAIL pgintrospect %.1f%% < 100%%\n", $$1; exit 1} else {printf "pgintrospect: %.1f%%\n", $$1}}'
 	go test -race -coverprofile=coverage.out ./jsoncontract/...
 	@go tool cover -func=coverage.out | tail -1 | awk '{print $$3}' | sed 's/%//' | \
 		awk '{if ($$1+0 < 95) {printf "FAIL jsoncontract %.1f%% < 95%%\n", $$1; exit 1} else {printf "jsoncontract: %.1f%%\n", $$1}}'
