@@ -13,7 +13,7 @@ sd ready        # Find unblocked work
 ## Project Rules
 
 - **Go conventions**: Prefer stdlib, remove dead code, no type aliases, no circular dependencies. External deps: golang.org/x/text, excelize/v2.
-- **Testing**: Per-package coverage gates (profile/csv/fingerprint 100%, json/excel 95%). Compare complete objects in tests. Race detector on all runs.
+- **Testing**: Per-package coverage gates (profile/csv/fingerprint/odcs/odcsemit/declimport 100%, json/excel 95%). Compare complete objects in tests. Race detector on all runs.
 - **Pre-commit**: Runs `make check` (tidy, vet, lint, per-package coverage, build). All must pass.
 - **Commits**: Conventional Commits format (`<type>[optional scope]: <description>`). Imperative mood, start capitalized, no trailing period.
 - **All changes go through PRs.** Never push directly to main.
