@@ -1,4 +1,4 @@
-.PHONY: build test lint vet tidy check clean setup import-tools import-test
+.PHONY: build test lint vet tidy check clean setup import-tools import-test integration-test
 
 # Pinned Python toolchain for the declared-schema importer (declimport).
 # Kept out of `make check` on purpose: the declimport unit tests run against
@@ -46,6 +46,18 @@ tidy:
 	go mod tidy
 
 check: tidy vet lint test build
+
+# Two-tier gate. `check` above is the fast, pure-Go default: no Docker, no
+# network. `integration-test` is the second tier for destination code that
+# needs a live Postgres. It is deliberately kept out of `check` so the default
+# developer path stays Docker-free. The internal/pgtest harness starts a
+# throwaway Postgres via testcontainers (needs a Docker daemon), or connects to
+# an existing database when TEST_PG_CONN is set. Tests skip — not fail — when
+# neither is available. The declimport CLI integration tests share the same tag
+# and skip here unless their pinned binary is on PATH (use `make import-test`
+# for those specifically, which also puts the venv on PATH).
+integration-test:
+	go test -tags=integration -race ./...
 
 setup:
 	git config core.hooksPath .githooks
