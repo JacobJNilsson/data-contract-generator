@@ -165,6 +165,35 @@ func TestFromDataContractMultiSchemaAndNullability(t *testing.T) {
 	}
 }
 
+// The Excel header-detection outcome rides the document as a custom
+// property when the schema metadata carries it (fp2), and is absent
+// otherwise, so the fingerprint's ODCS path reproduces the native one.
+func TestFromDataContractHeaderFlag(t *testing.T) {
+	dc := contract.DataContract{
+		ID:       "workbook",
+		Metadata: map[string]any{"source_format": "xlsx"},
+		Schemas: []contract.SchemaContract{
+			{
+				Name:     "WithFlag",
+				Metadata: map[string]any{"has_header": false},
+				Fields:   []contract.FieldDefinition{{Name: "a", DataType: "text"}},
+			},
+			{
+				Name:   "WithoutFlag",
+				Fields: []contract.FieldDefinition{{Name: "b", DataType: "text"}},
+			},
+		},
+	}
+	c := FromDataContract(dc)
+	got, ok := odcs.CustomProp(c.Schema[0].CustomProperties, odcs.CustomKeyHasHeader)
+	if !ok || got != false {
+		t.Errorf("WithFlag has_header = %v (present %v), want false", got, ok)
+	}
+	if _, ok := odcs.CustomProp(c.Schema[1].CustomProperties, odcs.CustomKeyHasHeader); ok {
+		t.Error("WithoutFlag must not carry a has_header custom property")
+	}
+}
+
 // TestEnumRoundTrip is the spec section 4.2 proof: emit an enum to ODCS,
 // read it back, and recover the identical ordered labels and native type
 // name. Arguments is free-form in ODCS, so this round-trip is owned by our

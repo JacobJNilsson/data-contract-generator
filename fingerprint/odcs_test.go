@@ -278,6 +278,10 @@ func TestFromODCSFormatTypeAndValueErrors(t *testing.T) {
 		{"json missing encoding", []odcs.CustomProperty{
 			{Property: odcs.CustomKeySourceFormat, Value: "json"},
 		}},
+		{"xlsx non-bool header", []odcs.CustomProperty{
+			{Property: odcs.CustomKeySourceFormat, Value: "xlsx"},
+			{Property: odcs.CustomKeyHasHeader, Value: "yes"},
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -285,6 +289,41 @@ func TestFromODCSFormatTypeAndValueErrors(t *testing.T) {
 				t.Errorf("expected error for %s", c.name)
 			}
 		})
+	}
+}
+
+// The Excel header flag is optional on the ODCS path, mirroring the
+// native schemaParseProfile: present rides into the parse profile,
+// absent keeps a nil profile (a contract predating fp2).
+func TestFromODCSExcelHeaderFlag(t *testing.T) {
+	mk := func(props ...odcs.CustomProperty) odcs.Contract {
+		return odcs.Contract{Schema: []odcs.SchemaObject{{
+			Name:             "Sheet1",
+			CustomProperties: props,
+			Properties:       []odcs.Property{{Name: "a", LogicalType: odcs.LogicalString, PhysicalType: "text"}},
+		}}}
+	}
+
+	units, _, err := FromODCS(mk(
+		odcs.CustomProperty{Property: odcs.CustomKeySourceFormat, Value: "xlsx"},
+		odcs.CustomProperty{Property: odcs.CustomKeyHasHeader, Value: false},
+	))
+	if err != nil {
+		t.Fatalf("FromODCS with header flag: %v", err)
+	}
+	pp := units[0].Object.ParseProfile
+	if pp == nil || pp.HasHeader == nil || *pp.HasHeader {
+		t.Errorf("parse profile = %+v, want has_header false", pp)
+	}
+
+	units, _, err = FromODCS(mk(
+		odcs.CustomProperty{Property: odcs.CustomKeySourceFormat, Value: "xlsx"},
+	))
+	if err != nil {
+		t.Fatalf("FromODCS without header flag: %v", err)
+	}
+	if units[0].Object.ParseProfile != nil {
+		t.Errorf("parse profile = %+v, want nil without the flag", units[0].Object.ParseProfile)
 	}
 }
 

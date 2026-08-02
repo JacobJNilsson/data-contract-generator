@@ -87,14 +87,23 @@ func FromDataContract(dc contract.DataContract) odcs.Contract {
 			}
 			props = append(props, p)
 		}
+		custom := []odcs.CustomProperty{
+			{Property: odcs.CustomKeySourceFormat, Value: format},
+		}
+		// Excel tables carry their header-detection outcome in schema
+		// metadata; it is identity-bearing under fp2, so it rides the
+		// document exactly like the CSV header flag. A schema without
+		// the key emits none, and the fingerprint reads that as a nil
+		// parse profile, matching the native path.
+		if hasHeader, ok := schema.Metadata["has_header"].(bool); ok {
+			custom = append(custom, odcs.CustomProperty{Property: odcs.CustomKeyHasHeader, Value: hasHeader})
+		}
 		objects = append(objects, odcs.SchemaObject{
-			Name:         schema.Name,
-			PhysicalName: schema.Name,
-			PhysicalType: "table",
-			CustomProperties: []odcs.CustomProperty{
-				{Property: odcs.CustomKeySourceFormat, Value: format},
-			},
-			Properties: props,
+			Name:             schema.Name,
+			PhysicalName:     schema.Name,
+			PhysicalType:     "table",
+			CustomProperties: custom,
+			Properties:       props,
 		})
 	}
 	return odcs.Contract{

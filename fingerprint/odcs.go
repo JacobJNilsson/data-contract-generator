@@ -98,8 +98,9 @@ func odcsFormat(obj odcs.SchemaObject) (Format, error) {
 // odcsParseProfile reconstructs the parse profile per format, matching what
 // the native From* functions set. CSV carries delimiter, encoding, and
 // header presence; JSON and NDJSON carry only encoding (delimiter and
-// header stay nil so the canonical bytes match FromJSON's); Excel and API
-// carry no parse profile at all (nil, matching FromDataContract). The
+// header stay nil so the canonical bytes match FromJSON's); Excel carries
+// per-table header presence when the emitter stamped it (fp2, matching
+// schemaParseProfile) and nil otherwise; API carries no parse profile. The
 // custom-property values come back from YAML/JSON as their natural scalar
 // types, so each is type-asserted and a wrong type is an error rather than
 // a silent default that would forge a different fingerprint.
@@ -125,8 +126,20 @@ func odcsParseProfile(obj odcs.SchemaObject, format Format) (*ParseProfile, erro
 			return nil, err
 		}
 		return &ParseProfile{Encoding: &encoding}, nil
+	case FormatXLSX:
+		// Header presence is optional on Excel objects: absent mirrors a
+		// native schema without the detection outcome (nil profile), while
+		// a present-but-mistyped value still fails closed via odcsBool.
+		if _, ok := odcs.CustomProp(obj.CustomProperties, odcs.CustomKeyHasHeader); !ok {
+			return nil, nil
+		}
+		hasHeader, err := odcsBool(obj, odcs.CustomKeyHasHeader)
+		if err != nil {
+			return nil, err
+		}
+		return &ParseProfile{HasHeader: &hasHeader}, nil
 	default:
-		// Excel and API set no parse profile on the native path.
+		// API sets no parse profile on the native path.
 		return nil, nil
 	}
 }

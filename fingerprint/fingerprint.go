@@ -23,7 +23,12 @@ import (
 // AlgoVersion identifies the canonicalisation rules used to build and hash
 // fingerprint objects. Any change to those rules must bump it; old hashes are
 // never reinterpreted under new rules.
-const AlgoVersion = "fp1"
+//
+// fp2 (XL-5): Excel units carry per-table header presence in the parse
+// profile, so a headerless table whose synthesized positional names equal
+// another table's literal header can no longer share a fingerprint. Stored
+// fp1 objects re-enter service through Refingerprint.
+const AlgoVersion = "fp2"
 
 // CanonicalType is the coarse type lattice used for identity. The analyzer
 // vocabulary is already coarse, so strict equality on these tokens is stable
@@ -197,24 +202,38 @@ func FromDataContract(dc *contract.DataContract) (units []Unit, skipped []Skippe
 		units = append(units, Unit{
 			Locator: schema.Name,
 			Object: Object{
-				AlgoVersion: AlgoVersion,
-				Format:      format,
-				Fields:      fields,
+				AlgoVersion:  AlgoVersion,
+				Format:       format,
+				ParseProfile: schemaParseProfile(schema),
+				Fields:       fields,
 			},
 		})
 	}
 	return units, skipped, nil
 }
 
+// schemaParseProfile lifts a schema's identity-bearing parse facts into the
+// unit's parse profile. Excel tables carry header presence (fp2, XL-5): the
+// analyzer records its per-table detection outcome in the schema metadata,
+// and how a table's first row is read changes bytes-to-records exactly like
+// the CSV header flag. A schema without the metadata (an API spec, or a
+// contract predating the detection outcome) keeps a nil profile.
+func schemaParseProfile(schema contract.SchemaContract) *ParseProfile {
+	hasHeader, ok := schema.Metadata["has_header"].(bool)
+	if !ok {
+		return nil
+	}
+	return &ParseProfile{HasHeader: &hasHeader}
+}
+
 // dataContractFormat determines the source format kind from contract
 // metadata. Unrecognized contracts are an error, never a guess: an unknown
 // format must not silently share identity space with a known one.
 //
-// Identity limitation, mirroring spec L1: Excel header detection is per
-// sheet and not exposed on the contract, so a sheet whose literal header row
-// happens to equal the synthesized positional names of a headerless sheet
-// would collide. Resolving it needs the analyzer to expose the detection
-// outcome — a future algo_version, flagged rather than hidden.
+// The fp1 identity limitation (a headerless table colliding with a literal-
+// header twin) is closed under fp2: the analyzer exposes its per-table
+// header detection in schema metadata, and schemaParseProfile carries it
+// into identity.
 func dataContractFormat(dc *contract.DataContract) (Format, error) {
 	if dc.ContractType == "destination" {
 		return "", errors.New("fingerprint: destination contracts are not fingerprinted")
