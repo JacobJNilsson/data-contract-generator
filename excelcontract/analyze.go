@@ -119,7 +119,7 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 		return nil, nil, nil
 	}
 
-	seg := SegmentSheet(rows, declaredTables(f, sheet))
+	seg := SegmentSheet(rows, DeclaredTables(f, sheet))
 	issues := seg.Issues
 
 	// Hidden sheets are analyzed like visible ones (XL-L3): skipping
@@ -148,10 +148,14 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 	return schemas, issues, nil
 }
 
-// declaredTables reads the sheet's Excel Table objects. A read failure
-// yields none: the cells then segment heuristically, which loses author
-// intent but never data.
-func declaredTables(f *excelize.File, sheet string) []DeclaredTable {
+// DeclaredTables reads a sheet's Excel Table objects into the segmenter's
+// declared form (XL-3): the exported form of the read this package's own
+// analysis runs, so a caller that re-segments the SAME sheet later (the
+// orchestrator's reconciliation source pass, XL-14) reads the identical
+// declared bounds instead of a second, hand-copied implementation that
+// could drift from this one. A read failure yields none: the cells then
+// segment heuristically, which loses author intent but never data.
+func DeclaredTables(f *excelize.File, sheet string) []DeclaredTable {
 	tables, err := f.GetTables(sheet)
 	if err != nil {
 		return nil
