@@ -7,53 +7,6 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-// dataRegion describes where a table's data starts in a sheet.
-type dataRegion struct {
-	headerRow int // 0-indexed row index of the header
-	startRow  int // 0-indexed row index of the first data row
-}
-
-// detectDataRegion finds the header and data start rows for a sheet.
-// It first checks for Excel Table objects (which have explicit ranges),
-// then falls back to heuristic header detection.
-func detectDataRegion(f *excelize.File, sheet string, rows [][]string) *dataRegion {
-	// Priority 1: Excel Table objects have explicit header ranges.
-	var tables []excelize.Table
-	if f != nil {
-		var err error
-		tables, err = f.GetTables(sheet)
-		if err != nil {
-			tables = nil
-		}
-	}
-	if len(tables) > 0 {
-		// Use the first table's range. The header is the first row of the range.
-		ref := tables[0].Range
-		topLeft, _, err := parseRange(ref)
-		if err == nil {
-			return &dataRegion{
-				headerRow: topLeft.row,
-				startRow:  topLeft.row + 1,
-			}
-		}
-	}
-
-	// Priority 2: heuristic header detection.
-	// The header is the first non-empty row where at least one cell is
-	// non-numeric (same logic as CSV header detection).
-	for i, row := range rows {
-		if isEmptyRow(row) {
-			continue
-		}
-		return &dataRegion{
-			headerRow: i,
-			startRow:  i + 1,
-		}
-	}
-
-	return nil
-}
-
 // cellRef holds a 0-indexed row and column.
 type cellRef struct {
 	row int
