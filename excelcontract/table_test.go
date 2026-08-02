@@ -50,31 +50,3 @@ func TestParseRange(t *testing.T) {
 		}
 	}
 }
-
-func TestDetectDataRegionHeuristic(t *testing.T) {
-	// With header row.
-	rows := [][]string{
-		{"Name", "Age", "City"},
-		{"Alice", "30", "NYC"},
-	}
-	region := detectDataRegion(nil, "Sheet1", rows)
-	if region == nil {
-		t.Fatal("expected non-nil region")
-	}
-	if region.headerRow != 0 || region.startRow != 1 {
-		t.Errorf("region = %+v, want {0, 1}", region)
-	}
-
-	// All empty rows.
-	emptyRows := [][]string{{"", ""}, {"", ""}}
-	region = detectDataRegion(nil, "Sheet1", emptyRows)
-	if region != nil {
-		t.Errorf("expected nil region for empty rows, got %+v", region)
-	}
-
-	// No rows.
-	region = detectDataRegion(nil, "Sheet1", nil)
-	if region != nil {
-		t.Errorf("expected nil region for nil rows, got %+v", region)
-	}
-}

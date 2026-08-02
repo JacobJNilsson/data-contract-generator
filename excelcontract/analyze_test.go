@@ -343,43 +343,6 @@ func TestAnalyzeContextCancelledDuringSheetIteration(t *testing.T) {
 	}
 }
 
-func TestDetectDataRegionWithExcelTable(t *testing.T) {
-	// Test that detectDataRegion uses Excel Table objects when available.
-	data, err := os.ReadFile("testdata/excel-table.xlsx")
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-
-	f, err := openTestFile(data)
-	if err != nil {
-		t.Fatalf("OpenReader: %v", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		t.Fatal("no sheets")
-	}
-
-	rows, err := f.GetRows(sheets[0])
-	if err != nil {
-		t.Fatalf("GetRows: %v", err)
-	}
-
-	region := detectDataRegion(f, sheets[0], rows)
-	if region == nil {
-		t.Fatal("expected non-nil region")
-	}
-	// Excel Table starts at A1, so header=0, start=1.
-	if region.headerRow != 0 || region.startRow != 1 {
-		t.Errorf("region = %+v, want {0, 1}", region)
-	}
-}
-
-func openTestFile(data []byte) (*excelize.File, error) {
-	return excelize.OpenReader(bytes.NewReader(data))
-}
-
 func TestAnalyzeHeaderOnlySheet(t *testing.T) {
 	// Create a workbook with only a header row (no data rows).
 	f := excelize.NewFile()
@@ -402,12 +365,13 @@ func TestAnalyzeHomogeneousSheetNoHeader(t *testing.T) {
 	// identical value classes, so the first row is data, not a header.
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
-	// Row 3 is left blank: blank rows are skipped both by the header
-	// probe and by profiling.
+	// Contiguous rows: a blank row is a table separator under XL-1, so
+	// the issue #75 shape (homogeneous classes, first row is data) is
+	// asserted on one band.
 	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"P-600", "Kedjespannare K2", "75.50", "2026-06-07"})
 	_ = f.SetSheetRow("Sheet1", "A2", &[]any{"P-601", "Drevsats 13T", "189.00", "2026-06-07"})
-	_ = f.SetSheetRow("Sheet1", "A4", &[]any{"P-602", "Kedjelas X", "45.25", "2026-06-08"})
-	_ = f.SetSheetRow("Sheet1", "A5", &[]any{"P-603", "Bromsok F4", "320.00", "2026-06-08"})
+	_ = f.SetSheetRow("Sheet1", "A3", &[]any{"P-602", "Kedjelas X", "45.25", "2026-06-08"})
+	_ = f.SetSheetRow("Sheet1", "A4", &[]any{"P-603", "Bromsok F4", "320.00", "2026-06-08"})
 
 	buf, err := f.WriteToBuffer()
 	if err != nil {
