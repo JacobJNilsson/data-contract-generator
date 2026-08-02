@@ -239,7 +239,7 @@ func TestCollisionGuardMatch(t *testing.T) {
 	}
 
 	differentVersion := same
-	differentVersion.AlgoVersion = "fp2"
+	differentVersion.AlgoVersion = "fp1"
 	if Match(base, differentVersion) {
 		t.Errorf("differing algo_version still Matches")
 	}
@@ -381,22 +381,22 @@ func TestCanonicalBytesGolden(t *testing.T) {
 		csvField("amount", profile.TypeNumeric),
 		csvField("order_id", profile.TypeText),
 	))
-	want := `{"algo_version":"fp1","fields":[{"name":"amount","type":"NUMBER"},{"name":"order_id","type":"STRING"}],"format":"csv","nesting":null,"parse_profile":{"delimiter":",","encoding":"utf-8","has_header":true}}`
+	want := `{"algo_version":"fp2","fields":[{"name":"amount","type":"NUMBER"},{"name":"order_id","type":"STRING"}],"format":"csv","nesting":null,"parse_profile":{"delimiter":",","encoding":"utf-8","has_header":true}}`
 	if got := string(o.CanonicalBytes()); got != want {
 		t.Errorf("canonical bytes:\n got %s\nwant %s", got, want)
 	}
-	if !strings.HasPrefix(o.Hash(), "fp1:") {
+	if !strings.HasPrefix(o.Hash(), "fp2:") {
 		t.Errorf("hash %q lacks algo version prefix", o.Hash())
 	}
 
 	jsonObject := mustJSON(t, jsonContract("ndjson", jsonField("a", jsoncontract.TypeText)))
-	wantJSON := `{"algo_version":"fp1","fields":[{"name":"a","type":"STRING"}],"format":"ndjson","nesting":null,"parse_profile":{"delimiter":null,"encoding":"utf-8","has_header":null}}`
+	wantJSON := `{"algo_version":"fp2","fields":[{"name":"a","type":"STRING"}],"format":"ndjson","nesting":null,"parse_profile":{"delimiter":null,"encoding":"utf-8","has_header":null}}`
 	if got := string(jsonObject.CanonicalBytes()); got != wantJSON {
 		t.Errorf("ndjson canonical bytes:\n got %s\nwant %s", got, wantJSON)
 	}
 
 	bare := Object{AlgoVersion: AlgoVersion, Format: FormatXLSX, Fields: []Field{{Name: "x", Type: TypeString}}}
-	wantBare := `{"algo_version":"fp1","fields":[{"name":"x","type":"STRING"}],"format":"xlsx","nesting":null,"parse_profile":null}`
+	wantBare := `{"algo_version":"fp2","fields":[{"name":"x","type":"STRING"}],"format":"xlsx","nesting":null,"parse_profile":null}`
 	if got := string(bare.CanonicalBytes()); got != wantBare {
 		t.Errorf("bare canonical bytes:\n got %s\nwant %s", got, wantBare)
 	}
@@ -625,7 +625,8 @@ func TestPostgresTypesMap(t *testing.T) {
 // empty). The golden value was computed on main before the boolean and
 // timestamp classes existed: extending the vocabulary must not perturb
 // the canonical identity of existing types, or every cached pipeline
-// would silently miss.
+// would silently miss. Recomputed once for the fp2 algo bump (XL-5):
+// the canonical bytes changed only in algo_version.
 func TestGoldenHashUnchangedByNewTypes(t *testing.T) {
 	o := mustCSV(t, csvContract(
 		csvField("name", profile.TypeText),
@@ -633,11 +634,11 @@ func TestGoldenHashUnchangedByNewTypes(t *testing.T) {
 		csvField("created", profile.TypeDate),
 		csvField("notes", profile.TypeEmpty),
 	))
-	const golden = "fp1:8d72fc9034b5e5e5d641001cc648259d04b370831960dfd433d3dabc6ca2acf9"
+	const golden = "fp2:e99f61f589ee4c556ddd7fe49dc87117e55921941c819f9c2416adea5b0e5f92"
 	if got := o.Hash(); got != golden {
 		t.Errorf("hash = %s, want golden %s", got, golden)
 	}
-	const goldenBytes = `{"algo_version":"fp1","fields":[{"name":"amount","type":"NUMBER"},{"name":"created","type":"TEMPORAL"},{"name":"name","type":"STRING"},{"name":"notes","type":"UNKNOWN"}],"format":"csv","nesting":null,"parse_profile":{"delimiter":",","encoding":"utf-8","has_header":true}}`
+	const goldenBytes = `{"algo_version":"fp2","fields":[{"name":"amount","type":"NUMBER"},{"name":"created","type":"TEMPORAL"},{"name":"name","type":"STRING"},{"name":"notes","type":"UNKNOWN"}],"format":"csv","nesting":null,"parse_profile":{"delimiter":",","encoding":"utf-8","has_header":true}}`
 	if got := string(o.CanonicalBytes()); got != goldenBytes {
 		t.Errorf("canonical bytes = %s, want %s", got, goldenBytes)
 	}
