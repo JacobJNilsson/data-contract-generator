@@ -441,6 +441,46 @@ func TestAnalyzeSheetWithEmptyDataRows(t *testing.T) {
 
 // --- helpers ----------------------------------------------------------------
 
+// TestDeclaredTables (finding 6, the orchestrator's XL-14 reconciliation
+// source pass): the exported form of the sheet's own Excel Table read, so a
+// caller re-segmenting the SAME sheet later reads the identical declared
+// bounds this package's own analysis used, instead of a second
+// implementation that could drift from this one.
+func TestDeclaredTables(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"Product", "Revenue"})
+	_ = f.SetSheetRow("Sheet1", "A2", &[]any{"Widget", 1500.00})
+	if err := f.AddTable("Sheet1", &excelize.Table{Range: "A1:B2", Name: "SalesTable"}); err != nil {
+		t.Fatalf("AddTable: %v", err)
+	}
+
+	got := DeclaredTables(f, "Sheet1")
+	if len(got) != 1 {
+		t.Fatalf("DeclaredTables() = %+v, want exactly the one declared table", got)
+	}
+	if got[0].Name != "SalesTable" || got[0].Range != "A1:B2" || !got[0].HasHeader {
+		t.Errorf("DeclaredTables()[0] = %+v, want {SalesTable A1:B2 true}", got[0])
+	}
+}
+
+// TestDeclaredTablesNoneDeclared: a sheet with no Excel Table object, or a
+// sheet excelize cannot read tables for, yields none rather than an error -
+// the cells then segment heuristically, which loses author intent but never
+// data.
+func TestDeclaredTablesNoneDeclared(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	_ = f.SetSheetRow("Sheet1", "A1", &[]any{"Product", "Revenue"})
+
+	if got := DeclaredTables(f, "Sheet1"); len(got) != 0 {
+		t.Errorf("DeclaredTables(no declared table) = %+v, want none", got)
+	}
+	if got := DeclaredTables(f, "NoSuchSheet"); len(got) != 0 {
+		t.Errorf("DeclaredTables(unknown sheet) = %+v, want none", got)
+	}
+}
+
 func assertField(t *testing.T, f contract.FieldDefinition, wantName, wantType string) {
 	t.Helper()
 	if f.Name != wantName {
