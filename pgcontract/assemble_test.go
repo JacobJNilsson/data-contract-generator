@@ -8,6 +8,7 @@ package pgcontract
 
 import (
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -304,6 +305,44 @@ func TestAssembleFailsClosedOnUnsupportedType(t *testing.T) {
 	for _, want := range []string{"t", "blob", "bytea"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// TestAssembleFailsClosedOnUnsupportedTypeIsTyped pins the typed error
+// surface (spec Scope: the library's per-table refusals are typed, not
+// prose a consumer regex-parses). A caller recovers the exact table, column,
+// and reason for EVERY offending column with errors.As(err,
+// &pgcontract.ColumnTypeErrors{}), across two different tables at once, with
+// no message parsing.
+func TestAssembleFailsClosedOnUnsupportedTypeIsTyped(t *testing.T) {
+	f := facts{
+		tables: []string{"t", "u"},
+		columns: []pgintrospect.Column{
+			col("t", "id", "integer", "NO"),
+			col("t", "blob", "bytea", "NO"),
+			col("u", "id", "integer", "NO"),
+			col("u", "raw", "bit", "NO"),
+		},
+	}
+	_, err := assemble(f, nil)
+	if err == nil {
+		t.Fatal("assemble() = nil, want a fail-closed type error")
+	}
+	var typeErrs ColumnTypeErrors
+	if !errors.As(err, &typeErrs) {
+		t.Fatalf("errors.As(err, &ColumnTypeErrors{}) = false for err = %v, want true", err)
+	}
+	if len(typeErrs) != 2 {
+		t.Fatalf("ColumnTypeErrors = %+v, want 2 entries", typeErrs)
+	}
+	want := map[string]string{"t": "blob", "u": "raw"}
+	for _, ce := range typeErrs {
+		if ce.Column != want[ce.Table] {
+			t.Errorf("ColumnTypeError = %+v, want table %q to name column %q", ce, ce.Table, want[ce.Table])
+		}
+		if ce.Reason == "" {
+			t.Errorf("ColumnTypeError = %+v, want a non-empty Reason", ce)
 		}
 	}
 }
