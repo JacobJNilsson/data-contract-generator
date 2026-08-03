@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/JacobJNilsson/data-contract-generator/contract"
@@ -305,8 +306,11 @@ func TestOptionsDefaults(t *testing.T) {
 	if nilOpts.maxSampleRows() != 5 {
 		t.Errorf("nil maxSampleRows() = %d, want 5", nilOpts.maxSampleRows())
 	}
+	if nilOpts.maxUnzipBytes() != 1<<30 {
+		t.Errorf("nil maxUnzipBytes() = %d, want %d", nilOpts.maxUnzipBytes(), int64(1<<30))
+	}
 
-	opts := &Options{TopN: 3, MaxTracked: 42, MaxSampleRows: 10}
+	opts := &Options{TopN: 3, MaxTracked: 42, MaxSampleRows: 10, MaxUnzipBytes: 4096}
 	if opts.topN() != 3 {
 		t.Errorf("topN() = %d, want 3", opts.topN())
 	}
@@ -316,12 +320,34 @@ func TestOptionsDefaults(t *testing.T) {
 	if opts.maxSampleRows() != 10 {
 		t.Errorf("maxSampleRows() = %d, want 10", opts.maxSampleRows())
 	}
+	if opts.maxUnzipBytes() != 4096 {
+		t.Errorf("maxUnzipBytes() = %d, want 4096", opts.maxUnzipBytes())
+	}
 }
 
 func TestAnalyzeReaderInvalidData(t *testing.T) {
 	_, err := AnalyzeReader(ctx, bytes.NewReader([]byte("not an xlsx file")), nil)
 	if err == nil {
 		t.Fatal("expected error for invalid data")
+	}
+}
+
+// TestAnalyzeReaderRefusesOverTheUnzipCap: a workbook that expands past a
+// configured MaxUnzipBytes is refused at open time, before any sheet is
+// read. A tiny cap makes any real workbook exceed it, so this fixture needs
+// no purpose-built zip bomb: simple.xlsx already unzips to more than a few
+// bytes.
+func TestAnalyzeReaderRefusesOverTheUnzipCap(t *testing.T) {
+	data, err := os.ReadFile("testdata/simple.xlsx")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	_, err = AnalyzeReader(ctx, bytes.NewReader(data), &Options{MaxUnzipBytes: 16})
+	if err == nil {
+		t.Fatal("AnalyzeReader() error = nil, want a refusal over the tiny unzip cap")
+	}
+	if !strings.Contains(err.Error(), "unzip size exceeds") {
+		t.Errorf("AnalyzeReader() error = %q, want it to name the unzip size limit", err)
 	}
 }
 
