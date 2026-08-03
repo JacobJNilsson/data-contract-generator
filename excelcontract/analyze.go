@@ -40,7 +40,13 @@ func AnalyzeReader(ctx context.Context, r io.Reader, opts *Options) (*contract.D
 		return nil, err
 	}
 
-	f, err := excelize.OpenReader(r)
+	// UnzipSizeLimit bounds the EXPANDED size the reader may inflate a
+	// workbook to (MaxUnzipBytes on Options): a workbook is a zip archive,
+	// so a hostile file can arrive small and expand to gigabytes while
+	// unzipping (a zip bomb). Without an explicit limit here excelize
+	// falls back to its own 16 GiB default, which is not a bound worth
+	// calling one.
+	f, err := excelize.OpenReader(r, excelize.Options{UnzipSizeLimit: opts.maxUnzipBytes()})
 	if err != nil {
 		return nil, fmt.Errorf("open workbook: %w", err)
 	}
