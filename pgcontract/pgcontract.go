@@ -7,16 +7,22 @@
 // constraints, verbatim CHECK constraints, single-column foreign keys (the
 // structural triple), and enum labels.
 //
-// It is the FAITHFUL CORE only. The contract it returns describes what the
-// destination DECLARES and nothing more; the delivery- and mirror-shaped POLICY
-// a platform layers on a destination contract — producer-optionality folding
-// (MP-3), merge-key selection (MP-2), surrogate/generated-column and
-// destination-not-null markers, safe column defaults, and a foreign key's
-// natural-key resolution columns — is applied by the caller as a post-pass over
-// this faithful contract, never here. A column's producer-side signals
-// (identity, generated, default) ride through on the pgintrospect.Column facts
-// for that policy layer to read; this package reads only the destination's RAW
-// nullability.
+// It is the FAITHFUL CORE only. Generate and assemble return a contract that
+// describes what the destination DECLARES, nothing more. They never select a
+// merge key. They never fold producer optionality (MP-3). They never mark a
+// column as surrogate, generated, or destination-not-null. They never choose
+// a safe column default, or resolve a foreign key's natural-key columns. A
+// column's producer-side signals (identity, generated, default) ride through
+// on the pgintrospect.Column facts so a caller's own policy layer can read
+// them. This faithful core reads only the destination's RAW nullability.
+//
+// MergeKeyColumns (mergekey.go) is one exception to "never here". It is an
+// exported, pure POLICY helper this package provides. A caller derives a
+// merge key (MP-2) from those same facts through it, as its own post-pass.
+// Generate and assemble never call it. Every other POLICY concern —
+// producer-optionality folding, the not-null and generated-column markers, a
+// safe default, and a foreign key's natural-key resolution — stays the
+// caller's job entirely; this package does not touch any of it.
 //
 // It fails CLOSED: a column whose Postgres type is outside the reproducible
 // vocabulary is an error naming the column, never a guessed or dropped column,

@@ -2,9 +2,9 @@ package pgcontract
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/JacobJNilsson/data-contract-generator/odcs"
 	"github.com/JacobJNilsson/data-contract-generator/odcsdest"
@@ -57,7 +57,7 @@ type facts struct {
 // contract it returns describes exactly what the destination declares.
 func assemble(f facts, excludedColumn map[string]struct{}) (odcs.Contract, error) {
 	objs := make([]odcs.SchemaObject, 0, len(f.tables))
-	var typeErrs []error
+	var typeErrs ColumnTypeErrors
 	for _, name := range f.tables {
 		var props []odcs.Property
 		for _, col := range f.columns {
@@ -69,7 +69,7 @@ func assemble(f facts, excludedColumn map[string]struct{}) (odcs.Contract, error
 			}
 			prop, err := mapColumn(col, f.enums)
 			if err != nil {
-				typeErrs = append(typeErrs, fmt.Errorf("table %q %w", name, err))
+				typeErrs = append(typeErrs, ColumnTypeError{Table: name, Column: col.Name, Reason: err.Error()})
 				continue
 			}
 			props = append(props, prop)
@@ -84,13 +84,50 @@ func assemble(f facts, excludedColumn map[string]struct{}) (odcs.Contract, error
 		// Fail closed on any column the vocabulary cannot represent: a generated
 		// contract that silently dropped or mistyped a column would mislead both
 		// an agent and a mirror.
-		return odcs.Contract{}, fmt.Errorf("pgcontract: generate: %w", errors.Join(typeErrs...))
+		return odcs.Contract{}, fmt.Errorf("pgcontract: generate: %w", typeErrs)
 	}
 	contract := odcsdest.NewContract(objs...)
 	if err := validate(contract); err != nil {
 		return odcs.Contract{}, fmt.Errorf("pgcontract: generated contract is invalid: %w", err)
 	}
 	return contract, nil
+}
+
+// ColumnTypeError names one column whose Postgres type pgcontract's B1
+// vocabulary cannot reproduce faithfully: Table and Column name the site,
+// Reason carries the human-readable sentence (from odcsdest.PostgresProperty)
+// describing why. It is the typed element of ColumnTypeErrors, the aggregate
+// assemble returns when one or more columns fail closed.
+type ColumnTypeError struct {
+	Table  string
+	Column string
+	Reason string
+}
+
+// Error renders the same text the pre-typed aggregate used to produce:
+// `table "t" column "c" has unsupported type "x"` (Reason already names the
+// column, since odcsdest.PostgresProperty's own message does).
+func (e ColumnTypeError) Error() string {
+	return fmt.Sprintf("table %q %s", e.Table, e.Reason)
+}
+
+// ColumnTypeErrors aggregates every ColumnTypeError assemble finds across a
+// generated contract's tables, so Generate reports every offending column in
+// one pass (see the package doc's fail-closed rule) instead of stopping at
+// the first. A caller recovers the structured list with
+// errors.As(err, &pgcontract.ColumnTypeErrors{}) instead of parsing the
+// joined message text.
+type ColumnTypeErrors []ColumnTypeError
+
+// Error joins each element's message with a newline, the same separator
+// errors.Join used before this type existed, so an existing caller that only
+// logs the message keeps seeing the same multi-line text.
+func (e ColumnTypeErrors) Error() string {
+	msgs := make([]string, len(e))
+	for i, ce := range e {
+		msgs[i] = ce.Error()
+	}
+	return strings.Join(msgs, "\n")
 }
 
 // mapColumn turns one catalog column into its ODCS property through the pure
