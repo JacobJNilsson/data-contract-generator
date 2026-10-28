@@ -34,6 +34,16 @@ type script struct {
 	queryErr error
 	cols     []string
 	rows     [][]driver.Value
+	// then scripts the result sets of the queries after the first, in call
+	// order, for methods that issue more than one query.
+	then  []resultSet
+	calls int
+}
+
+type resultSet struct {
+	cols []string
+	rows [][]driver.Value
+	err  error
 }
 
 type scriptedRows struct {
@@ -78,7 +88,16 @@ func (c *scriptedConn) QueryContext(context.Context, string, []driver.NamedValue
 	if c.s.queryErr != nil {
 		return nil, c.s.queryErr
 	}
-	return &scriptedRows{cols: c.s.cols, rows: c.s.rows}, nil
+	rows := &scriptedRows{cols: c.s.cols, rows: c.s.rows}
+	if c.s.calls++; c.s.calls > 1 && len(c.s.then) > 0 {
+		next := c.s.then[0]
+		c.s.then = c.s.then[1:]
+		if next.err != nil {
+			return nil, next.err
+		}
+		rows = &scriptedRows{cols: next.cols, rows: next.rows}
+	}
+	return rows, nil
 }
 
 type scriptedDriver struct{}
@@ -165,17 +184,28 @@ var columnsCols = []string{
 	"numeric_scale", "element_type_mod",
 }
 
+var triggerCols = []string{"relname", "tgname", "prosrc"}
+
 func TestColumns(t *testing.T) {
 	db := scriptDB(t, &script{cols: columnsCols, rows: [][]driver.Value{
 		{"t", "id", "bigint", "NO", "YES", "NEVER", true, false, "identity", "int8", "public", "", int64(0), nil, int64(64), int64(0), int64(-1)},
 		{"t", "code", "character varying", "YES", "NO", "NEVER", false, false, nil, "varchar", "public", "", int64(0), int64(3), nil, nil, int64(-1)},
-	}})
+		{"accounts", "source_id", "bigint", "NO", "NO", "NEVER", false, false, nil, "int8", "public", "", int64(0), nil, int64(64), int64(0), int64(-1)},
+		{"accounts", "display_name", "character varying", "NO", "NO", "NEVER", false, false, nil, "varchar", "public", "", int64(0), int64(100), nil, nil, int64(-1)},
+		{"accounts", "name", "text", "NO", "NO", "NEVER", false, false, nil, "text", "public", "", int64(0), nil, nil, nil, int64(-1)},
+		{"accounts", "note", "text", "YES", "NO", "NEVER", false, false, nil, "text", "public", "", int64(0), nil, nil, nil, int64(-1)},
+		{"accounts", "currency", "text", "NO", "NO", "NEVER", true, false, "'SEK'::text", "text", "public", "", int64(0), nil, nil, nil, int64(-1)},
+		{"other", "source_id", "bigint", "NO", "NO", "NEVER", false, false, nil, "int8", "public", "", int64(0), nil, int64(64), int64(0), int64(-1)},
+	}, then: []resultSet{{cols: triggerCols, rows: [][]driver.Value{
+		{"accounts", "accounts_a_first", "begin new.name = 'x'; return new; end;"},
+		{"accounts", "accounts_resolve_source", accountsResolveSourceBody},
+	}}}})
 	got, err := pgintrospect.Columns(t.Context(), db)
 	if err != nil {
 		t.Fatalf("Columns() = %v, want nil", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("Columns() returned %d rows, want 2", len(got))
+	if len(got) != 8 {
+		t.Fatalf("Columns() returned %d rows, want 8", len(got))
 	}
 	id := got[0]
 	if id.Table != "t" || id.Name != "id" || id.DataType != "bigint" || id.Nullable != "NO" ||
@@ -189,6 +219,97 @@ func TestColumns(t *testing.T) {
 	code := got[1]
 	if code.Name != "code" || code.Default.Valid || !code.CharMaxLength.Valid || code.CharMaxLength.Int64 != 3 || code.NumericPrecision.Valid {
 		t.Errorf("Columns()[1] = %+v, want the scripted varchar(3) column's facts", code)
+	}
+	wantTrigger := map[string]string{
+		"t.id": "", "t.code": "",
+		"accounts.source_id": "accounts_resolve_source", "accounts.display_name": "accounts_resolve_source",
+		"accounts.name": "accounts_a_first", "accounts.note": "", "accounts.currency": "",
+		"other.source_id": "",
+	}
+	for _, c := range got {
+		if want := wantTrigger[c.Table+"."+c.Name]; c.FillingTrigger != want {
+			t.Errorf("Columns() %s.%s FillingTrigger = %q, want %q", c.Table, c.Name, c.FillingTrigger, want)
+		}
+	}
+}
+
+func TestColumnsReportTriggerQueryFailure(t *testing.T) {
+	boom := errors.New("trigger query failed")
+	db := scriptDB(t, &script{cols: columnsCols, then: []resultSet{{err: boom}}})
+	if _, err := pgintrospect.Columns(t.Context(), db); !errors.Is(err, boom) {
+		t.Errorf("Columns(trigger query failure) = %v, want %v", err, boom)
+	}
+}
+
+// accountsResolveSourceBody is the prosrc of wealth-tracker's
+// accounts_resolve_source trigger function (migration
+// 20260919120000_sources_and_display_names.sql).
+const accountsResolveSourceBody = `
+begin
+  if new.source_id is null or (tg_op = 'UPDATE' and new.source is distinct from old.source) then
+    insert into sources (user_id, key, display_name, default_currency)
+    values (new.user_id, new.source, new.source, coalesce(new.currency, 'SEK'))
+    on conflict (user_id, key) do nothing;
+    select id into new.source_id from sources
+     where user_id = new.user_id and key = new.source;
+  end if;
+  if new.display_name is null
+     or (tg_op = 'UPDATE' and new.name is distinct from old.name and new.display_name = old.name) then
+    new.display_name := new.name;
+  end if;
+  return new;
+end;
+`
+
+func TestAssignsNewColumn(t *testing.T) {
+	cases := []struct {
+		name, source, column string
+		want                 bool
+	}{
+		{"into form in the wealth-tracker trigger", accountsResolveSourceBody, "source_id", true},
+		{"walrus form in the wealth-tracker trigger", accountsResolveSourceBody, "display_name", true},
+		{"read-only column in the wealth-tracker trigger", accountsResolveSourceBody, "user_id", false},
+		{"column only compared with is distinct from", accountsResolveSourceBody, "name", false},
+		{"equals form", "new.slug = lower(new.name);", "slug", true},
+		{"no space before operator", "new.slug:=1;", "slug", true},
+		{"tabs and newlines around operator", "NEW.slug\n\t:=\n\t1;", "slug", true},
+		{"if comparison", "IF new.x = 5 THEN return new; END IF;", "x", false},
+		{"multi-line if comparison", "IF\n  new.x = 5\nTHEN return new; END IF;", "x", false},
+		{"comparison on the right", "select 1 from t where k = new.col;", "col", false},
+		{"assignment after then", "if a then new.x := 5; end if;", "x", true},
+		{"assignment after begin", "begin new.x = 5; end;", "x", true},
+		{"assignment after else", "if a then null; else new.x := 5; end if;", "x", true},
+		{"assignment in loop", "loop new.x := 5; exit; end loop;", "x", true},
+		{"assignment after a statement", "a := 1;\n  new.x := 5;", "x", true},
+		{"line comment", "-- new.x := 5;\nreturn new;", "x", false},
+		{"block comment", "/* new.x := 5; */ return new;", "x", false},
+		{"unterminated block comment", "return new; /* new.x := 5;", "x", false},
+		{"line comment without newline", "return new; -- new.x := 5;", "x", false},
+		{"string literal", "raise notice 'new.x := 5; it''s'; return new;", "x", false},
+		{"unterminated string literal", "raise notice 'new.x := 5;", "x", false},
+		{"assignment after a comment", "/* c */ new.x := 5;", "x", true},
+		{"quoted column is case-sensitive", `new."Slug" := 1;`, "slug", false},
+		{"upper case source", "NEW.SLUG := 1;", "slug", true},
+		{"upper case into", "SELECT 1 INTO NEW.slug;", "slug", true},
+		{"quoted column", `new."Slug" := 1;`, "Slug", true},
+		{"longer name with suffix", "new.source_id_old := 1;", "source_id", false},
+		{"longer name with suffix in into form", "select 1 into new.source_id_old;", "source_id", false},
+		{"longer name with prefix", "new.old_source_id := 1;", "source_id", false},
+		{"other record named like new", "renew.slug := 1;", "slug", false},
+		{"comparison with less-or-equal", "if new.slug <= 3 then", "slug", false},
+		{"comparison with not-equal", "if new.slug != 3 then", "slug", false},
+		{"read in expression", "x := new.slug;", "slug", false},
+		{"empty column", "new. := 1;", "", false},
+		{"empty source", "", "slug", false},
+		{"column with regexp metacharacters", "new.a.b := 1;", "a.b", true},
+		{"regexp metacharacter does not match any character", "new.axb := 1;", "a.b", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pgintrospect.AssignsNewColumn(tc.source, tc.column); got != tc.want {
+				t.Errorf("AssignsNewColumn(%q, %q) = %v, want %v", tc.source, tc.column, got, tc.want)
+			}
+		})
 	}
 }
 
