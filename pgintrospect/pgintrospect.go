@@ -28,6 +28,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -180,6 +181,13 @@ type Column struct {
 	// packed precision/scale when it is constrained. For an ARRAY column the
 	// array's atttypmod carries the ELEMENT's modifier.
 	ElementTypeMod int
+
+	// FillingTrigger names the BEFORE INSERT ... FOR EACH ROW plpgsql trigger
+	// whose function assigns this column, and is empty otherwise. It is set
+	// only for a NOT NULL column with no default. A function in another
+	// language, or an assignment AssignsNewColumn does not match, leaves it
+	// empty, so the column stays required.
+	FillingTrigger string
 }
 
 // Columns returns every public-schema column in (table, ordinal) order.
@@ -235,7 +243,119 @@ func Columns(ctx context.Context, q Querier) ([]Column, error) {
 	if err != nil {
 		return nil, err
 	}
+	triggers, err := insertTriggers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		c := &out[i]
+		if c.Nullable != "NO" || c.HasDefault {
+			continue
+		}
+		for _, t := range triggers {
+			if t.table == c.Table && AssignsNewColumn(t.source, c.Name) {
+				c.FillingTrigger = t.name
+				break
+			}
+		}
+	}
 	return out, nil
+}
+
+// insertTrigger is one BEFORE INSERT row trigger with the source of its
+// plpgsql function.
+type insertTrigger struct {
+	table, name, source string
+}
+
+// insertTriggers reads the public-schema triggers that run BEFORE INSERT FOR
+// EACH ROW (tgtype bits 2, 4 and 1) and call a plpgsql function. It excludes
+// internal triggers, disabled triggers and triggers with a WHEN condition,
+// because none of them fills the column on every insert.
+func insertTriggers(ctx context.Context, q Querier) ([]insertTrigger, error) {
+	const query = `SELECT cl.relname, t.tgname, p.prosrc
+	                 FROM pg_trigger t
+	                 JOIN pg_class cl ON cl.oid = t.tgrelid
+	                 JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+	                 JOIN pg_proc p ON p.oid = t.tgfoid
+	                 JOIN pg_language l ON l.oid = p.prolang
+	                WHERE ns.nspname = 'public'
+	                  AND NOT t.tgisinternal
+	                  AND t.tgenabled <> 'D'
+	                  AND t.tgqual IS NULL
+	                  AND l.lanname = 'plpgsql'
+	                  AND (t.tgtype::int & 7) = 7
+	                ORDER BY cl.relname, t.tgname`
+	var out []insertTrigger
+	err := forEachRow(ctx, q, query, nil, func(rows *sql.Rows) error {
+		var t insertTrigger
+		err := rows.Scan(&t.table, &t.name, &t.source)
+		if err == nil {
+			out = append(out, t)
+		}
+		return err
+	})
+	return out, err
+}
+
+// AssignsNewColumn reports whether a PL/pgSQL function source assigns
+// new.<column>. It matches `new.<column> :=` and `new.<column> =` at a
+// statement start (the source start, or after `;`, begin, then, else or loop)
+// and `into new.<column>` anywhere, so a comparison does not match. Comments
+// and single-quoted strings are ignored. Matching is case-insensitive, allows
+// whitespace around the operator and accepts a double-quoted column name, which
+// matches case-sensitively. A longer name that starts with the column name does
+// not match. The scan is textual, so a miss only leaves the column required.
+func AssignsNewColumn(source, column string) bool {
+	if column == "" {
+		return false
+	}
+	q := regexp.QuoteMeta(column)
+	name := `(?:` + q + `\b|(?-i:"` + q + `"))`
+	re := regexp.MustCompile(`(?i)(?:(?:^|;|\bbegin\b|\bthen\b|\belse\b|\bloop\b)\s*new\.` + name + `\s*:?=|\binto\s+new\.` + name + `)`)
+	return re.MatchString(stripNoise(source))
+}
+
+// stripNoise replaces each comment and single-quoted string literal with a
+// space, so text inside them cannot match.
+func stripNoise(src string) string {
+	var b strings.Builder
+	for i := 0; i < len(src); {
+		switch {
+		case strings.HasPrefix(src[i:], "--"):
+			end := strings.IndexByte(src[i:], '\n')
+			if end < 0 {
+				end = len(src) - i
+			}
+			i += end
+			b.WriteByte(' ')
+		case strings.HasPrefix(src[i:], "/*"):
+			end := strings.Index(src[i+2:], "*/")
+			if end < 0 {
+				i = len(src)
+			} else {
+				i += end + 4
+			}
+			b.WriteByte(' ')
+		case src[i] == '\'':
+			i++
+			for i < len(src) && src[i] != '\'' {
+				i++
+			}
+			for i+1 < len(src) && src[i] == '\'' && src[i+1] == '\'' {
+				i += 2
+				for i < len(src) && src[i] != '\'' {
+					i++
+				}
+			}
+			i++
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(src[i])
+			i++
+		}
+	}
+	return b.String()
 }
 
 // EnumValues returns an enum type's allowed labels in declared order

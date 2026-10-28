@@ -444,3 +444,98 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// TestColumnsReportFillingTrigger proves the trigger read on a live server: a
+// NOT NULL column with no default that a BEFORE INSERT row trigger assigns
+// carries the trigger's name, and the same assignment from an AFTER trigger, a
+// BEFORE UPDATE-only trigger, or onto a column with a default does not. The
+// function body is wealth-tracker's accounts_resolve_source.
+func TestColumnsReportFillingTrigger(t *testing.T) {
+	db := pg.Open(t)
+	ctx := context.Background()
+
+	execAll(t, db,
+		`CREATE TABLE trg_sources (
+			id      bigserial PRIMARY KEY,
+			user_id bigint NOT NULL,
+			key     text NOT NULL,
+			UNIQUE (user_id, key)
+		)`,
+		`CREATE TABLE trg_accounts (
+			id           bigserial PRIMARY KEY,
+			user_id      bigint NOT NULL,
+			source       text NOT NULL,
+			name         text NOT NULL,
+			currency     text,
+			source_id    bigint NOT NULL,
+			display_name text NOT NULL,
+			with_default text NOT NULL DEFAULT 'x',
+			after_only   text NOT NULL,
+			update_only  text NOT NULL,
+			disabled_col text NOT NULL,
+			when_col     text NOT NULL
+		)`,
+		`CREATE FUNCTION trg_accounts_resolve_source() RETURNS trigger LANGUAGE plpgsql AS $$
+		begin
+		  if new.source_id is null or (tg_op = 'UPDATE' and new.source is distinct from old.source) then
+		    insert into trg_sources (user_id, key) values (new.user_id, new.source)
+		    on conflict (user_id, key) do nothing;
+		    select id into new.source_id from trg_sources
+		     where user_id = new.user_id and key = new.source;
+		  end if;
+		  if new.display_name is null then
+		    new.display_name := new.name;
+		  end if;
+		  new.with_default := 'y';
+		  return new;
+		end;
+		$$`,
+		`CREATE FUNCTION trg_accounts_after() RETURNS trigger LANGUAGE plpgsql AS $$
+		begin new.after_only := 'x'; return new; end;
+		$$`,
+		`CREATE FUNCTION trg_accounts_update() RETURNS trigger LANGUAGE plpgsql AS $$
+		begin new.update_only := 'x'; return new; end;
+		$$`,
+		`CREATE FUNCTION trg_accounts_disabled() RETURNS trigger LANGUAGE plpgsql AS $$
+		begin new.disabled_col := 'x'; return new; end;
+		$$`,
+		`CREATE FUNCTION trg_accounts_when() RETURNS trigger LANGUAGE plpgsql AS $$
+		begin new.when_col := 'x'; return new; end;
+		$$`,
+		`CREATE TRIGGER trg_disabled BEFORE INSERT ON trg_accounts
+			FOR EACH ROW EXECUTE FUNCTION trg_accounts_disabled()`,
+		`ALTER TABLE trg_accounts DISABLE TRIGGER trg_disabled`,
+		`CREATE TRIGGER trg_when BEFORE INSERT ON trg_accounts
+			FOR EACH ROW WHEN (new.name <> '') EXECUTE FUNCTION trg_accounts_when()`,
+		`CREATE TRIGGER trg_resolve_source BEFORE INSERT OR UPDATE ON trg_accounts
+			FOR EACH ROW EXECUTE FUNCTION trg_accounts_resolve_source()`,
+		`CREATE TRIGGER trg_after AFTER INSERT ON trg_accounts
+			FOR EACH ROW EXECUTE FUNCTION trg_accounts_after()`,
+		`CREATE TRIGGER trg_update BEFORE UPDATE ON trg_accounts
+			FOR EACH ROW EXECUTE FUNCTION trg_accounts_update()`,
+	)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, `DROP TABLE IF EXISTS trg_accounts, trg_sources`)
+		_, _ = db.ExecContext(ctx, `DROP FUNCTION IF EXISTS trg_accounts_resolve_source(), trg_accounts_after(), trg_accounts_update(), trg_accounts_disabled(), trg_accounts_when()`)
+	})
+
+	cols, err := pgintrospect.Columns(ctx, db)
+	if err != nil {
+		t.Fatalf("Columns() = %v", err)
+	}
+	got := map[string]string{}
+	for _, c := range cols {
+		if c.Table == "trg_accounts" {
+			got[c.Name] = c.FillingTrigger
+		}
+	}
+	want := map[string]string{
+		"id": "", "user_id": "", "source": "", "name": "", "currency": "",
+		"source_id": "trg_resolve_source", "display_name": "trg_resolve_source",
+		"with_default": "", "after_only": "", "update_only": "",
+		"disabled_col": "", "when_col": "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FillingTrigger by column = %v, want %v", got, want)
+	}
+}
