@@ -43,7 +43,7 @@ func (p *ColumnProfiler) Observe(value string) {
 
 	p.tracker.Observe(value)
 	p.shape.observe(value)
-	p.decimal.observe(value)
+	p.decimal.Observe(value)
 
 	if count, exists := p.freqs[value]; exists {
 		p.freqs[value] = count + 1
