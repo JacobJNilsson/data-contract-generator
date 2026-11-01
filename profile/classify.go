@@ -281,6 +281,12 @@ type numericValue struct {
 	isInt bool
 }
 
+// trimCell strips surrounding whitespace and then surrounding quotes. Numeric
+// parsing and decimal evidence share it so they read the same text.
+func trimCell(s string) string {
+	return strings.Trim(strings.TrimSpace(s), "\"")
+}
+
 // parseNumericValue is the single definition of "numeric" shared by
 // IsNumeric, ParseNumeric, and RangeTracker (issue #80).
 //
@@ -291,8 +297,7 @@ type numericValue struct {
 // the zeros and corrupt join keys. A leading minus signals numeric
 // intent, so -007 still parses as -7.
 func parseNumericValue(s string) (numericValue, bool) {
-	s = strings.TrimSpace(s)
-	s = strings.Trim(s, "\"")
+	s = trimCell(s)
 	if s == "" {
 		return numericValue{}, false
 	}
