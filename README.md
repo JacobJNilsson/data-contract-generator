@@ -91,4 +91,41 @@ fingerprint/     ← structural identity for the pipeline cache
 
 `excelcontract` emits `contract.DataContract`, while `csvcontract` and `jsoncontract` emit their own `SourceContract` shapes, so `contract/` is the shared type set for the schema-style path, not a single source of truth across every package. `csvcontract` and `excelcontract` share the `profile/` core; `jsoncontract` carries its own profiling and is a known divergence. No circular dependencies.
 
+## The decimal mark
+
+A CSV holds numbers as text, so a reader can only read a numeric column if it
+knows the column's decimal mark. The generator states the mark only when the
+file proves it, and states nothing it cannot prove.
+
+**The grammar.** `profile.ParseDecimal(s, mark)` reads a number with a
+declared mark, `,` or `.`. A number is an optional leading `-`, one or more
+digits, and optionally the mark followed by one or more digits. Nothing else
+is a number: no group separator, no exponent, no currency sign, no percent
+sign, and no surrounding space. The parser never guesses.
+
+**The evidence.** A value proves its mark when it holds exactly one
+separator, `,` or `.`, with digits on both sides and a number of digits after
+the separator other than three. `3,1416` proves `,`. `12,345` proves
+nothing, because it reads as 12.345 or as 12345. A leading `-` does not
+change the rule.
+
+**The file's mark.** `csvcontract` and `excelcontract` collect the evidence
+from every column the profiler types numeric. When every proving value agrees,
+the contract states the mark: `decimal_char` in the native contract, and the
+schema-level custom property `dcgDecimalChar` in the ODCS document, beside
+`dcgDelimiter`. When no value proves a mark, or values prove both marks, the
+contract states none.
+
+**Ranges.** An unproven value is a value the profiler types numeric that
+holds a `,` or a `.` and proves no mark. `12,345`, `1,234.56`, `.5` and `5.`
+are unproven. A numeric column that holds an unproven value gets no
+`min_value` and no `max_value`, even when other values prove the file's mark.
+The column's type stays numeric. Every other column keeps its range.
+
+**What does not change.** The mark is not part of the structural
+fingerprint, so it changes no cache key. Type classification does not
+change. `profile.ParseNumeric` keeps its behaviour for its existing callers.
+`jsoncontract` reads JSON numbers, which have one spelling, so the rule does
+not apply to it.
+
 The standalone source-analysis packages (REST/OpenAPI, PostgreSQL, Supabase) and the contract verification and transform-mapping packages were removed when the standalone analysis product they served was wound down; they live in git history if ever needed again.
