@@ -38,6 +38,8 @@ const (
 	CustomKeySourceFormat = "dcgSourceFormat"
 	// CustomKeyDelimiter carries a CSV field delimiter.
 	CustomKeyDelimiter = "dcgDelimiter"
+	// CustomKeyDecimalChar carries the decimal mark a source proves.
+	CustomKeyDecimalChar = "dcgDecimalChar"
 	// CustomKeyEncoding carries a source's character encoding.
 	CustomKeyEncoding = "dcgEncoding"
 	// CustomKeyHasHeader carries whether a CSV had a header row.

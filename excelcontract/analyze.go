@@ -54,17 +54,19 @@ func AnalyzeReader(ctx context.Context, r io.Reader, opts *Options) (*contract.D
 
 	sheets := f.GetSheetList()
 	var schemas []contract.SchemaContract
+	var decimals []profile.DecimalEvidence
 	sheetIssues := map[string]any{}
 	for _, sheet := range sheets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		scs, issues, err := analyzeSheet(f, sheet, opts)
+		scs, issues, evidence, err := analyzeSheet(f, sheet, opts)
 		if err != nil {
 			return nil, fmt.Errorf("sheet %q: %w", sheet, err)
 		}
 		schemas = append(schemas, scs...)
+		decimals = append(decimals, evidence...)
 		if len(issues) > 0 {
 			sheetIssues[sheet] = issues
 		}
@@ -80,6 +82,9 @@ func AnalyzeReader(ctx context.Context, r io.Reader, opts *Options) (*contract.D
 	md := map[string]any{
 		"source_format": "xlsx",
 		"sheet_count":   len(sheets),
+	}
+	if mark := profile.FileDecimalMark(decimals); mark != "" {
+		md["decimal_char"] = mark
 	}
 	// Sheet-level issues (stray cells, empty declared tables, dropped
 	// header-only tables) belong to the sheet, not to any one table's
@@ -116,13 +121,13 @@ func refuseLocatorCollision(schemas []contract.SchemaContract) error {
 // analyzeSheet segments one sheet into tables and builds one schema per
 // table that carries data. It returns the schemas plus the sheet-level
 // issues (strays, empty or header-only tables).
-func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.SchemaContract, []string, error) {
+func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.SchemaContract, []string, []profile.DecimalEvidence, error) {
 	rows, err := f.GetRows(sheet)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read rows: %w", err)
+		return nil, nil, nil, fmt.Errorf("read rows: %w", err)
 	}
 	if len(rows) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	seg := SegmentSheet(rows, DeclaredTables(f, sheet))
@@ -135,8 +140,9 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 	hidden := visErr == nil && !visible
 
 	var schemas []contract.SchemaContract
+	var decimals []profile.DecimalEvidence
 	for ordinal, t := range seg.Tables {
-		sc := buildTableSchema(rows, t, opts)
+		sc, evidence := buildTableSchema(rows, t, opts)
 		if sc == nil {
 			issues = append(issues, fmt.Sprintf("table at %s has a header but no data rows; no schema was emitted for it", cellName(t.StartRow, t.StartCol)))
 			continue
@@ -150,8 +156,9 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 		sc.Namespace = sheet
 		sc.Metadata = tableMetadata(t, hidden)
 		schemas = append(schemas, *sc)
+		decimals = append(decimals, evidence...)
 	}
-	return schemas, issues, nil
+	return schemas, issues, decimals, nil
 }
 
 // DeclaredTables reads a sheet's Excel Table objects into the segmenter's
@@ -202,8 +209,9 @@ func tableMetadata(t Segment, hidden bool) map[string]any {
 
 // buildTableSchema profiles one table region into a SchemaContract.
 // It returns nil for a table with a header and no data rows; the caller
-// records that loudly.
-func buildTableSchema(rows [][]string, t Segment, opts *Options) *contract.SchemaContract {
+// records that loudly. The second result is the decimal evidence of each
+// numeric column.
+func buildTableSchema(rows [][]string, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence) {
 	numFields := t.EndCol - t.StartCol + 1
 	var fieldNames []string
 	issues := t.Issues
@@ -259,12 +267,16 @@ func buildTableSchema(rows [][]string, t Segment, opts *Options) *contract.Schem
 	}
 
 	if totalRows == 0 {
-		return nil
+		return nil, nil
 	}
 
 	fields := make([]contract.FieldDefinition, numFields)
+	var evidence []profile.DecimalEvidence
 	for i, name := range fieldNames {
 		fp := profilers[i].Finish(topN)
+		if colTypes[i] == profile.TypeNumeric {
+			evidence = append(evidence, profilers[i].Decimal())
+		}
 		fields[i] = contract.FieldDefinition{
 			Name:     name,
 			DataType: string(colTypes[i]),
@@ -291,7 +303,7 @@ func buildTableSchema(rows [][]string, t Segment, opts *Options) *contract.Schem
 		ValidationRules: contract.ValidationRules{
 			RequiredFields: requiredFields(fields),
 		},
-	}
+	}, evidence
 }
 
 // cellRange extracts row cells over inclusive column bounds, padding a

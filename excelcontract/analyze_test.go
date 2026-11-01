@@ -536,3 +536,78 @@ func assertProfile(t *testing.T, fieldName string, p *contract.FieldProfile, wan
 		t.Errorf("field %q: distinct_count = %d, want %d", fieldName, p.DistinctCount, wantDistinct)
 	}
 }
+
+// analyzeSheets builds a workbook with one sheet per entry (a header row
+// "Name", "Qty" followed by the Qty values) and analyzes it.
+func analyzeSheets(t *testing.T, sheets ...[]string) *contract.DataContract {
+	t.Helper()
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	for i, qtys := range sheets {
+		name := "S" + string(rune('1'+i))
+		if i == 0 {
+			if err := f.SetSheetName("Sheet1", name); err != nil {
+				t.Fatalf("SetSheetName: %v", err)
+			}
+		} else if _, err := f.NewSheet(name); err != nil {
+			t.Fatalf("NewSheet: %v", err)
+		}
+		_ = f.SetSheetRow(name, "A1", &[]any{"Name", "Qty"})
+		for r, q := range qtys {
+			_ = f.SetSheetRow(name, "A"+string(rune('2'+r)), &[]any{"row", q})
+		}
+	}
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("WriteToBuffer: %v", err)
+	}
+	dc, err := AnalyzeReader(ctx, bytes.NewReader(buf.Bytes()), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	return dc
+}
+
+func TestAnalyzeDecimalChar(t *testing.T) {
+	tests := []struct {
+		name   string
+		sheets [][]string
+		want   any
+	}{
+		{"comma", [][]string{{"1,5", "2,25"}}, ","},
+		{"dot", [][]string{{"1.5", "2.25"}}, "."},
+		{"no proof", [][]string{{"1", "2"}}, nil},
+		{"three digits prove nothing", [][]string{{"1,234", "2,345"}}, nil},
+		{"sheets agree", [][]string{{"1,5", "2"}, {"3,25", "4"}}, ","},
+		{"sheets conflict", [][]string{{"1,5", "2"}, {"3.25", "4"}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dc := analyzeSheets(t, tt.sheets...)
+			got, present := dc.Metadata["decimal_char"]
+			if tt.want == nil {
+				if present {
+					t.Errorf("decimal_char = %v, want absent", got)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("decimal_char = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnalyzeUnprovenNumberOmitsRange(t *testing.T) {
+	dc := analyzeSheets(t, []string{"3,1416", "-2,75", "5", "12,345"})
+	qty := dc.Schemas[0].Fields[1]
+	if qty.DataType != "numeric" {
+		t.Fatalf("Qty type = %q, want numeric", qty.DataType)
+	}
+	if qty.Profile.MinValue != nil || qty.Profile.MaxValue != nil {
+		t.Errorf("range = %v, %v; want none", qty.Profile.MinValue, qty.Profile.MaxValue)
+	}
+	if dc.Metadata["decimal_char"] != "," {
+		t.Errorf("decimal_char = %v, want ,", dc.Metadata["decimal_char"])
+	}
+}

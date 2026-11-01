@@ -248,12 +248,24 @@ func streamAnalyze(ctx context.Context, r io.Reader, delimiter rune, opts *Optio
 	}
 
 	return &SourceContract{
-		HasHeader:  hasHeader,
-		TotalRows:  totalRows,
-		Fields:     fields,
-		SampleData: sampleRows,
-		Issues:     collectIssues(headerGuessed, stats, fields),
+		DecimalChar: fileDecimalMark(stats),
+		HasHeader:   hasHeader,
+		TotalRows:   totalRows,
+		Fields:      fields,
+		SampleData:  sampleRows,
+		Issues:      collectIssues(headerGuessed, stats, fields),
 	}, nil
+}
+
+// fileDecimalMark returns the decimal mark that the numeric columns prove.
+func fileDecimalMark(stats *columnStats) string {
+	var evidence []profile.DecimalEvidence
+	for i, t := range stats.types {
+		if t == profile.TypeNumeric {
+			evidence = append(evidence, stats.profilers[i].Decimal())
+		}
+	}
+	return profile.FileDecimalMark(evidence)
 }
 
 // nullSentinels are the common spellings that mean "no value" but count

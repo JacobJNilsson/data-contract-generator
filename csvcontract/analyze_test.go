@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -36,6 +37,7 @@ func TestAnalyzeSimpleCSV(t *testing.T) {
 		SourceFormat: "csv",
 		Encoding:     "utf-8",
 		Delimiter:    ",",
+		DecimalChar:  ".",
 		HasHeader:    true,
 		TotalRows:    5,
 		Fields: []Field{
@@ -139,6 +141,7 @@ func TestAnalyzeEuropeanCSV(t *testing.T) {
 		SourceFormat: "csv",
 		Encoding:     "utf-8",
 		Delimiter:    ";",
+		DecimalChar:  ",",
 		HasHeader:    true,
 		TotalRows:    5,
 		Fields: []Field{
@@ -189,6 +192,7 @@ func TestAnalyzeNoHeader(t *testing.T) {
 		SourceFormat: "csv",
 		Encoding:     "utf-8",
 		Delimiter:    ",",
+		DecimalChar:  ".",
 		HasHeader:    false,
 		TotalRows:    3,
 		Fields: []Field{
@@ -241,6 +245,7 @@ func TestAnalyzeHomogeneousNoHeader(t *testing.T) {
 		SourceFormat: "csv",
 		Encoding:     "utf-8",
 		Delimiter:    ",",
+		DecimalChar:  ".",
 		HasHeader:    false,
 		TotalRows:    4,
 		Fields: []Field{
@@ -1396,6 +1401,9 @@ func assertContract(t *testing.T, got *SourceContract, want SourceContract) {
 	if got.Delimiter != want.Delimiter {
 		t.Errorf("delimiter = %q, want %q", got.Delimiter, want.Delimiter)
 	}
+	if got.DecimalChar != want.DecimalChar {
+		t.Errorf("decimal_char = %q, want %q", got.DecimalChar, want.DecimalChar)
+	}
 	if got.HasHeader != want.HasHeader {
 		t.Errorf("has_header = %v, want %v", got.HasHeader, want.HasHeader)
 	}
@@ -1528,5 +1536,72 @@ func TestOptionsDefaults(t *testing.T) {
 	}
 	if opts.maxSampleRows() != 10 {
 		t.Errorf("maxSampleRows() = %d, want 10", opts.maxSampleRows())
+	}
+}
+
+func analyzeString(t *testing.T, data string) *SourceContract {
+	t.Helper()
+	got, err := AnalyzeReader(ctx, strings.NewReader(data), nil)
+	if err != nil {
+		t.Fatalf("AnalyzeReader: %v", err)
+	}
+	return got
+}
+
+// TestAnalyzeUnprovenDecimal checks that 12,345 reads as 12.345
+// or as 12345, so Quantity gets no range even though its other values prove the comma.
+func TestAnalyzeUnprovenDecimal(t *testing.T) {
+	got := analyzeString(t, "Date;Quantity\n2026-01-01;3,1416\n2026-01-02;-2,75\n2026-01-03;5\n2026-01-04;12,345\n")
+	want := &SourceContract{
+		SourceFormat: "csv",
+		Encoding:     "utf-8",
+		Delimiter:    ";",
+		DecimalChar:  ",",
+		HasHeader:    true,
+		TotalRows:    4,
+		Fields: []Field{
+			{Name: "Date", DataType: profile.TypeDate, Profile: profile.FieldProfile{
+				TotalCount: 4, DistinctCount: 4,
+				MinValue: ptr("2026-01-01"), MaxValue: ptr("2026-01-04"),
+				TopValues: []ct.TopValue{tv("2026-01-01", 1), tv("2026-01-02", 1), tv("2026-01-03", 1), tv("2026-01-04", 1)},
+				Shape:     got.Fields[0].Profile.Shape,
+			}},
+			{Name: "Quantity", DataType: profile.TypeNumeric, Profile: profile.FieldProfile{
+				TotalCount: 4, DistinctCount: 4,
+				TopValues: []ct.TopValue{tv("-2,75", 1), tv("12,345", 1), tv("3,1416", 1), tv("5", 1)},
+				Shape:     got.Fields[1].Profile.Shape,
+			}},
+		},
+		SampleData: [][]string{
+			{"2026-01-01", "3,1416"}, {"2026-01-02", "-2,75"}, {"2026-01-03", "5"}, {"2026-01-04", "12,345"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("contract = %+v, want %+v", got, want)
+	}
+}
+
+func TestAnalyzeDecimalChar(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{"comma", "a;b\n1,5;x\n2,25;y\n", ","},
+		{"dot", "a;b\n1.5;x\n2.25;y\n", "."},
+		{"integers prove nothing", "a;b\n1;x\n2;y\n", ""},
+		{"three digits prove nothing", "a;b\n1,234;x\n2,345;y\n", ""},
+		{"agreeing columns", "a;b\n1,5;2,5\n3,5;4,25\n", ","},
+		{"conflicting columns", "a;b\n1,5;2.5\n3,5;4.25\n", ""},
+		{"conflict inside a column", "a;b\n1,5;x\n1.5;y\n", ""},
+		{"non-numeric column is not evidence", "a;b\n1;1,5\n2;x\n", ""},
+		{"text column is not evidence", "a;b\n1,5;x\n2.5;y\n", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := analyzeString(t, tt.data).DecimalChar; got != tt.want {
+				t.Errorf("DecimalChar = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

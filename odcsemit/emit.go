@@ -37,6 +37,9 @@ func FromSourceContract(sc csvcontract.SourceContract) odcs.Contract {
 		{Property: odcs.CustomKeyEncoding, Value: sc.Encoding},
 		{Property: odcs.CustomKeyHasHeader, Value: sc.HasHeader},
 	}
+	if sc.DecimalChar != "" {
+		custom = append(custom, odcs.CustomProperty{Property: odcs.CustomKeyDecimalChar, Value: sc.DecimalChar})
+	}
 	return singleObjectContract(sc.SourcePath, sc.SourcePath, props, custom)
 }
 
@@ -97,6 +100,9 @@ func FromDataContract(dc contract.DataContract) odcs.Contract {
 		// parse profile, matching the native path.
 		if hasHeader, ok := schema.Metadata["has_header"].(bool); ok {
 			custom = append(custom, odcs.CustomProperty{Property: odcs.CustomKeyHasHeader, Value: hasHeader})
+		}
+		if mark, ok := dc.Metadata["decimal_char"].(string); ok && mark != "" {
+			custom = append(custom, odcs.CustomProperty{Property: odcs.CustomKeyDecimalChar, Value: mark})
 		}
 		objects = append(objects, odcs.SchemaObject{
 			Name:             schema.Name,
