@@ -1,7 +1,10 @@
 package profile
 
 import (
+	"reflect"
 	"testing"
+
+	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
 func TestColumnProfilerEmpty(t *testing.T) {
@@ -518,5 +521,51 @@ func TestRangeTrackerTemporalAfterNonTemporal(t *testing.T) {
 	}
 	if tracker.Max() != "pending" {
 		t.Errorf("max = %q, want pending", tracker.Max())
+	}
+}
+
+func TestColumnProfilerUnprovenNumberOmitsRange(t *testing.T) {
+	mixed := []string{"3,1416", "-2,75", "5", "12,345"}
+	p := NewColumnProfiler(100)
+	for _, v := range mixed {
+		p.Observe(v)
+	}
+	got := p.Finish(2)
+	want := FieldProfile{
+		TotalCount:    4,
+		DistinctCount: 4,
+		TopValues: []contract.TopValue{
+			{Value: "-2,75", Count: 1},
+			{Value: "12,345", Count: 1},
+		},
+		Shape: got.Shape,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("profile = %+v, want %+v", got, want)
+	}
+	if got, want := p.Decimal(), (DecimalEvidence{Comma: true, Unproven: true}); got != want {
+		t.Errorf("Decimal() = %+v, want %+v", got, want)
+	}
+}
+
+func TestColumnProfilerProvenNumbersKeepRange(t *testing.T) {
+	p := NewColumnProfiler(100)
+	for _, v := range []string{"3,1416", "-2,75", "5"} {
+		p.Observe(v)
+	}
+	got := p.Finish(1)
+	if got.MinValue == nil || *got.MinValue != "-2,75" || got.MaxValue == nil || *got.MaxValue != "5" {
+		t.Errorf("range = %v, %v; want -2,75 and 5", got.MinValue, got.MaxValue)
+	}
+}
+
+func TestColumnProfilerUnprovenTextKeepsRange(t *testing.T) {
+	p := NewColumnProfiler(100)
+	for _, v := range []string{"12,345", "abc"} {
+		p.Observe(v)
+	}
+	got := p.Finish(1)
+	if got.MinValue == nil || *got.MinValue != "12,345" || got.MaxValue == nil || *got.MaxValue != "abc" {
+		t.Errorf("range = %v, %v; want 12,345 and abc", got.MinValue, got.MaxValue)
 	}
 }

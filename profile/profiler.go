@@ -20,6 +20,7 @@ type ColumnProfiler struct {
 	capped     bool
 	tracker    RangeTracker
 	shape      shapeTracker
+	decimal    DecimalEvidence
 }
 
 // NewColumnProfiler creates a profiler that tracks up to maxTracked
@@ -42,6 +43,7 @@ func (p *ColumnProfiler) Observe(value string) {
 
 	p.tracker.Observe(value)
 	p.shape.observe(value)
+	p.decimal.observe(value)
 
 	if count, exists := p.freqs[value]; exists {
 		p.freqs[value] = count + 1
@@ -52,10 +54,17 @@ func (p *ColumnProfiler) Observe(value string) {
 	}
 }
 
+// Decimal returns what the observed values say about the decimal mark.
+func (p *ColumnProfiler) Decimal() DecimalEvidence {
+	return p.decimal
+}
+
 // Finish computes the final FieldProfile from the accumulated state.
 func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 	var minVal, maxVal *string
-	if p.tracker.seen {
+	// A number such as 12,345 reads as 12.345 or as 12345, so its column has
+	// no range that holds under both readings.
+	if p.tracker.seen && (!p.tracker.allNumeric || !p.decimal.Unproven) {
 		mn := p.tracker.Min()
 		mx := p.tracker.Max()
 		minVal = &mn
