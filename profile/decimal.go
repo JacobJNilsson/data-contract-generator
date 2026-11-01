@@ -47,10 +47,13 @@ type DecimalEvidence struct {
 	Unproven bool
 }
 
-// observe adds one value. A value counts only when parseNumericValue reads it
-// as numeric. It proves a mark when it holds exactly one separator with digits
-// on both sides and a number of digits other than three after the separator.
-func (e *DecimalEvidence) observe(v string) {
+// Observe adds one value. A value counts only when ParseNumeric accepts it,
+// after surrounding spaces and quotes are trimmed. Other values change nothing.
+// A counted value with exactly one separator, digits on both sides, and a number
+// of digits other than three after the separator sets Comma or Dot. A counted
+// value whose separator proves nothing sets Unproven. Fields only turn on, so
+// the zero value is ready to use.
+func (e *DecimalEvidence) Observe(v string) {
 	if _, ok := parseNumericValue(v); !ok {
 		return
 	}

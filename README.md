@@ -107,7 +107,10 @@ sign, and no surrounding space. The parser never guesses.
 separator, `,` or `.`, with digits on both sides and a number of digits after
 the separator other than three. `3,1416` proves `,`. `12,345` proves
 nothing, because it reads as 12.345 or as 12345. A leading `-` does not
-change the rule.
+change the rule. `profile.DecimalEvidence.Observe` applies the rule to one
+value, for a caller that reads a file one value at a time. It counts every
+value that `profile.ParseNumeric` accepts, a wider set than the `ParseDecimal`
+grammar.
 
 **The file's mark.** `csvcontract` and `excelcontract` collect the evidence
 from every column the profiler types numeric. When every proving value agrees,

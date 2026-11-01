@@ -112,7 +112,7 @@ func TestDecimalEvidenceObserve(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got DecimalEvidence
 			for _, v := range tt.values {
-				got.observe(v)
+				got.Observe(v)
 			}
 			if got != tt.want {
 				t.Errorf("evidence = %+v, want %+v", got, tt.want)
