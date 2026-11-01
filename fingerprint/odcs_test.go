@@ -439,3 +439,40 @@ func TestODCSTokenUnknownColumn(t *testing.T) {
 		})
 	}
 }
+
+// TestDecimalCharIsNotIdentity proves the decimal mark changes no
+// fingerprint, on the native path and on the ODCS path that carries it.
+func TestDecimalCharIsNotIdentity(t *testing.T) {
+	base := csvcontract.SourceContract{
+		SourcePath: "a.csv", Delimiter: ";", Encoding: "utf-8", HasHeader: true,
+		Fields: []csvcontract.Field{{Name: "qty", DataType: profile.TypeNumeric}},
+	}
+	for _, mark := range []string{",", "."} {
+		marked := base
+		marked.DecimalChar = mark
+
+		nativeBase, err := FromCSV(&base)
+		if err != nil {
+			t.Fatalf("FromCSV: %v", err)
+		}
+		nativeMarked, err := FromCSV(&marked)
+		if err != nil {
+			t.Fatalf("FromCSV: %v", err)
+		}
+		if string(nativeBase.CanonicalBytes()) != string(nativeMarked.CanonicalBytes()) {
+			t.Errorf("native bytes change with mark %q", mark)
+		}
+
+		doc := odcsemit.FromSourceContract(marked)
+		if _, ok := odcs.CustomProp(doc.Schema[0].CustomProperties, odcs.CustomKeyDecimalChar); !ok {
+			t.Fatalf("emitted document lacks %s for mark %q", odcs.CustomKeyDecimalChar, mark)
+		}
+		units, skipped, err := FromODCS(doc)
+		if err != nil || len(skipped) != 0 || len(units) != 1 {
+			t.Fatalf("FromODCS: units %d, skipped %+v, err %v", len(units), skipped, err)
+		}
+		if string(units[0].Object.CanonicalBytes()) != string(nativeBase.CanonicalBytes()) {
+			t.Errorf("ODCS bytes change with mark %q", mark)
+		}
+	}
+}

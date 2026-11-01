@@ -2,6 +2,7 @@ package odcsemit
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/JacobJNilsson/data-contract-generator/contract"
@@ -372,5 +373,51 @@ func TestFromDataContractFormatMarkers(t *testing.T) {
 				t.Errorf("format = %v, want %v", v, c.want)
 			}
 		})
+	}
+}
+
+func TestDecimalCharEmission(t *testing.T) {
+	csv := func(mark string) []odcs.CustomProperty {
+		sc := csvcontract.SourceContract{
+			SourcePath: "x.csv", Delimiter: ";", Encoding: "utf-8", HasHeader: true, DecimalChar: mark,
+			Fields: []csvcontract.Field{{Name: "a", DataType: profile.TypeNumeric}},
+		}
+		return FromSourceContract(sc).Schema[0].CustomProperties
+	}
+	wantBase := []odcs.CustomProperty{
+		{Property: odcs.CustomKeySourceFormat, Value: "csv"},
+		{Property: odcs.CustomKeyDelimiter, Value: ";"},
+		{Property: odcs.CustomKeyEncoding, Value: "utf-8"},
+		{Property: odcs.CustomKeyHasHeader, Value: true},
+	}
+	if got := csv(""); !reflect.DeepEqual(got, wantBase) {
+		t.Errorf("csv without a mark = %+v, want %+v", got, wantBase)
+	}
+	wantComma := append(slices.Clone(wantBase), odcs.CustomProperty{Property: "dcgDecimalChar", Value: ","})
+	if got := csv(","); !reflect.DeepEqual(got, wantComma) {
+		t.Errorf("csv with a mark = %+v, want %+v", got, wantComma)
+	}
+
+	dc := contract.DataContract{
+		Metadata: map[string]any{"source_format": "xlsx", "decimal_char": "."},
+		Schemas: []contract.SchemaContract{
+			{Name: "A", Fields: []contract.FieldDefinition{{Name: "a", DataType: "numeric"}}},
+			{Name: "B", Fields: []contract.FieldDefinition{{Name: "b", DataType: "numeric"}}},
+		},
+	}
+	for _, obj := range FromDataContract(dc).Schema {
+		want := []odcs.CustomProperty{
+			{Property: odcs.CustomKeySourceFormat, Value: "xlsx"},
+			{Property: "dcgDecimalChar", Value: "."},
+		}
+		if !reflect.DeepEqual(obj.CustomProperties, want) {
+			t.Errorf("%s custom properties = %+v, want %+v", obj.Name, obj.CustomProperties, want)
+		}
+	}
+	dc.Metadata = map[string]any{"source_format": "xlsx"}
+	for _, obj := range FromDataContract(dc).Schema {
+		if _, ok := customVal(obj.CustomProperties, odcs.CustomKeyDecimalChar); ok {
+			t.Errorf("%s carries a decimal mark without evidence", obj.Name)
+		}
 	}
 }

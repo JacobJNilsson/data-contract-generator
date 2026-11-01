@@ -6,15 +6,19 @@ import "github.com/JacobJNilsson/data-contract-generator/profile"
 
 // SourceContract is the complete analysis result for a CSV file.
 type SourceContract struct {
-	SourceFormat string     `json:"source_format"`
-	SourcePath   string     `json:"source_path"`
-	Encoding     string     `json:"encoding"`
-	Delimiter    string     `json:"delimiter"`
-	HasHeader    bool       `json:"has_header"`
-	TotalRows    int        `json:"total_rows"`
-	Fields       []Field    `json:"fields"`
-	SampleData   [][]string `json:"sample_data"`
-	Issues       []string   `json:"issues"`
+	SourceFormat string `json:"source_format"`
+	SourcePath   string `json:"source_path"`
+	Encoding     string `json:"encoding"`
+	Delimiter    string `json:"delimiter"`
+	// DecimalChar is the decimal mark, "," or ".", that the numeric
+	// columns prove. It is empty when no value proves a mark or when
+	// values prove both.
+	DecimalChar string     `json:"decimal_char,omitempty"`
+	HasHeader   bool       `json:"has_header"`
+	TotalRows   int        `json:"total_rows"`
+	Fields      []Field    `json:"fields"`
+	SampleData  [][]string `json:"sample_data"`
+	Issues      []string   `json:"issues"`
 }
 
 // Field describes a single column in the CSV file.
