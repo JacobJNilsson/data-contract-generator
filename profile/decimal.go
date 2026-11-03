@@ -3,26 +3,69 @@ package profile
 import (
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
-// ParseDecimal reads a number written with the declared decimal mark, ',' or
-// '.'. The grammar is an optional '-', one or more digits, and optionally the
-// mark followed by one or more digits. Nothing else is a number.
-func ParseDecimal(s string, mark byte) (float64, bool) {
-	if mark != ',' && mark != '.' {
+// ParseDecimal reads a number written with a declared decimal mark and a
+// declared group mark. A group mark of 0 declares that the source groups no
+// digits. Each mark is one character that is neither a digit of any script
+// nor a sign, and the two marks differ. Otherwise ParseDecimal returns false.
+//
+// A number is an optional '-', a whole part, and optionally the decimal mark
+// followed by one or more digits. The whole part is one or more digits. With a
+// group mark, it may instead be one to three digits followed by one or more
+// groups of the group mark and exactly three digits. Nothing else is a number.
+func ParseDecimal(s string, decimal, group rune) (float64, bool) {
+	if decimal == 0 || !validMark(decimal) || decimal == group || (group != 0 && !validMark(group)) {
 		return 0, false
 	}
 	body := strings.TrimPrefix(s, "-")
-	intPart, frac, hasMark := strings.Cut(body, string(mark))
-	if !allASCIIDigits(intPart) || (hasMark && !allASCIIDigits(frac)) {
+	whole, frac, hasFrac := strings.Cut(body, string(decimal))
+	if hasFrac && !allASCIIDigits(frac) {
 		return 0, false
 	}
-	normalized := strings.Replace(s, string(mark), ".", 1)
+	digits, ok := wholeDigits(whole, group)
+	if !ok {
+		return 0, false
+	}
+	normalized := digits
+	if len(body) < len(s) {
+		normalized = "-" + normalized
+	}
+	if hasFrac {
+		normalized += "." + frac
+	}
 	f, err := strconv.ParseFloat(normalized, 64)
 	if err != nil {
 		return 0, false
 	}
 	return f, true
+}
+
+// validMark reports whether r can be a decimal or group mark: a valid
+// character that is neither a digit of any script nor a sign.
+func validMark(r rune) bool {
+	return utf8.ValidRune(r) && !unicode.IsDigit(r) && r != '-' && r != '+'
+}
+
+// wholeDigits returns the digits of a whole part with its group marks
+// removed. With group 0 the whole part is plain digits. Otherwise it is plain
+// digits, or one to three digits followed by groups of three.
+func wholeDigits(whole string, group rune) (string, bool) {
+	if group == 0 || !strings.ContainsRune(whole, group) {
+		return whole, allASCIIDigits(whole)
+	}
+	parts := strings.Split(whole, string(group))
+	if len(parts[0]) > 3 || !allASCIIDigits(parts[0]) {
+		return "", false
+	}
+	for _, p := range parts[1:] {
+		if len(p) != 3 || !allASCIIDigits(p) {
+			return "", false
+		}
+	}
+	return strings.Join(parts, ""), true
 }
 
 // allASCIIDigits reports whether s is one or more characters '0' to '9'.
@@ -61,8 +104,8 @@ func (e *DecimalEvidence) Observe(v string) {
 	if !strings.ContainsAny(s, ",.") {
 		return
 	}
-	for _, mark := range []byte{',', '.'} {
-		if _, ok := ParseDecimal(s, mark); !ok {
+	for _, mark := range []rune{',', '.'} {
+		if _, ok := ParseDecimal(s, mark, 0); !ok {
 			continue
 		}
 		if _, frac, _ := strings.Cut(s, string(mark)); len(frac) != 3 {
