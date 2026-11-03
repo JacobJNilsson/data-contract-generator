@@ -97,11 +97,18 @@ A CSV holds numbers as text, so a reader can only read a numeric column if it
 knows the column's decimal mark. The generator states the mark only when the
 file proves it, and states nothing it cannot prove.
 
-**The grammar.** `profile.ParseDecimal(s, mark)` reads a number with a
-declared mark, `,` or `.`. A number is an optional leading `-`, one or more
-digits, and optionally the mark followed by one or more digits. Nothing else
-is a number: no group separator, no exponent, no currency sign, no percent
-sign, and no surrounding space. The parser never guesses.
+**The grammar.** `profile.ParseDecimal(s, decimal, group)` reads a number
+with a declared decimal mark and a declared group mark. The two marks follow
+`decimalChar` and `groupChar` of Frictionless Table Schema. Each mark is one
+character that is neither a digit of any script nor a sign, and the two marks
+differ. A group mark of 0 declares that the source groups no digits.
+
+A number is an optional leading `-`, a whole part, and optionally the decimal
+mark followed by one or more digits. The whole part is one or more digits.
+With a group mark, the whole part may instead be one to three digits followed
+by one or more groups, each the group mark and exactly three digits. Nothing
+else is a number: no exponent, no currency sign, no percent sign, and no
+surrounding space. The parser never guesses.
 
 **The evidence.** A value proves its mark when it holds exactly one
 separator, `,` or `.`, with digits on both sides and a number of digits after
