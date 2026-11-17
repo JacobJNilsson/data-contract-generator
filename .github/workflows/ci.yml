@@ -26,6 +26,9 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      - name: Anti-slop
+        run: make antislop
+
       - name: Test profile (100%)
         run: |
           go test -race -coverprofile=coverage.out ./profile/...

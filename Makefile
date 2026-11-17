@@ -1,4 +1,10 @@
-.PHONY: build test lint vet tidy check clean setup import-tools import-test integration-test
+.PHONY: build test lint vet tidy check clean setup import-tools import-test integration-test antislop antislop-all
+
+ANTISLOP := go run github.com/JacobJNilsson/anti-slop-go/cmd/antislop@v1.4.1
+
+# A rule joins this list when `make antislop-all` reports zero findings for it.
+# The goal is every rule.
+ANTISLOP_ENFORCED := -nolaundering -noerrorassert -noreflect -nomonkeypatch -safetyassert -separategotwant
 
 # Pinned Python toolchain for the declared-schema importer (declimport).
 # Kept out of `make check` on purpose: the declimport unit tests run against
@@ -54,7 +60,14 @@ vet:
 tidy:
 	go mod tidy
 
-check: tidy vet lint test build
+antislop:
+	$(ANTISLOP) $(ANTISLOP_ENFORCED) ./...
+
+# Reports every rule, including those not yet enforced. Never fails the build.
+antislop-all:
+	-$(ANTISLOP) ./...
+
+check: tidy vet lint antislop test build
 
 # Two-tier gate. `check` above is the fast, pure-Go default: no Docker, no
 # network. `integration-test` is the second tier for destination code that
