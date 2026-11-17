@@ -5,6 +5,7 @@ import (
 	"io"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
@@ -110,13 +111,13 @@ func utf8SeqLen(lead byte) int {
 
 // utf16Decoder decodes UTF-16 input to UTF-8. The BOM picks the byte
 // order and is consumed, so downstream readers never see it.
-func utf16Decoder() transform.Transformer {
+func utf16Decoder() *encoding.Decoder {
 	return unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder()
 }
 
 // newUTF16Reader wraps r so that UTF-16 bytes are decoded to UTF-8 on
 // the fly. This avoids loading the entire file into memory for decoding.
-func newUTF16Reader(r io.Reader) io.Reader {
+func newUTF16Reader(r io.Reader) *transform.Reader {
 	return transform.NewReader(r, utf16Decoder())
 }
 
@@ -132,7 +133,7 @@ func decodeUTF16(data []byte) []byte {
 // newWindows1252Reader wraps r so that windows-1252 bytes are decoded
 // to UTF-8 on the fly. This avoids loading the entire file into memory
 // for decoding.
-func newWindows1252Reader(r io.Reader) io.Reader {
+func newWindows1252Reader(r io.Reader) *transform.Reader {
 	return transform.NewReader(r, charmap.Windows1252.NewDecoder())
 }
 

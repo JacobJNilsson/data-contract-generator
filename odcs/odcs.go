@@ -191,6 +191,11 @@ const (
 	MetricRowCount        QualityMetric = "rowCount"
 )
 
+// QualityArguments holds the arguments of a library quality rule. It is a
+// map because each ODCS metric defines its own argument names and value
+// shapes, such as validValues for invalidValues.
+type QualityArguments map[string]any
+
 // Quality is one quality rule on a property. dcg's primary use is the enum
 // rule: type=library, metric=invalidValues, arguments.validValues carrying
 // the ordered label set, mustBe=0, unit=rows. Arguments is free-form (the
@@ -201,10 +206,10 @@ const (
 // scalar an ODCS rule compares against; with omitempty, an unset threshold
 // (nil) marshals away rather than asserting a zero bound.
 type Quality struct {
-	ID        string         `json:"id,omitempty" yaml:"id,omitempty"`
-	Type      QualityType    `json:"type,omitempty" yaml:"type,omitempty"`
-	Metric    QualityMetric  `json:"metric,omitempty" yaml:"metric,omitempty"`
-	Arguments map[string]any `json:"arguments,omitempty" yaml:"arguments,omitempty"`
+	ID        string           `json:"id,omitempty" yaml:"id,omitempty"`
+	Type      QualityType      `json:"type,omitempty" yaml:"type,omitempty"`
+	Metric    QualityMetric    `json:"metric,omitempty" yaml:"metric,omitempty"`
+	Arguments QualityArguments `json:"arguments,omitempty" yaml:"arguments,omitempty"`
 
 	MustBe            any `json:"mustBe,omitempty" yaml:"mustBe,omitempty"`
 	MustNotBe         any `json:"mustNotBe,omitempty" yaml:"mustNotBe,omitempty"`

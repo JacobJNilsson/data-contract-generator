@@ -351,13 +351,13 @@ func TestFromJSONContractCarriesParseFacts(t *testing.T) {
 func TestFromDataContractFormatMarkers(t *testing.T) {
 	cases := []struct {
 		name     string
-		metadata map[string]any
+		metadata contract.Metadata
 		want     string
 	}{
-		{"xlsx", map[string]any{"source_format": "xlsx"}, "xlsx"},
-		{"openapi", map[string]any{"source": "openapi"}, "api"},
+		{"xlsx", contract.Metadata{"source_format": "xlsx"}, "xlsx"},
+		{"openapi", contract.Metadata{"source": "openapi"}, "api"},
 		{"none", nil, ""},
-		{"unknown", map[string]any{"source_format": "weird"}, ""},
+		{"unknown", contract.Metadata{"source_format": "weird"}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
