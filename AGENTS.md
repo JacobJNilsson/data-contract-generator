@@ -14,7 +14,8 @@ sd ready        # Find unblocked work
 
 - **Go conventions**: Prefer stdlib, remove dead code, no type aliases, no circular dependencies. External deps: golang.org/x/text, excelize/v2.
 - **Testing**: Per-package coverage gates (profile/csv/fingerprint/odcs/odcsemit/odcsdest/pgcheck/pgintrospect/declimport 100%, json/excel 95%) in the fast tier; `pgcontract` gated 100% in the integration tier (it needs a live Postgres). Compare complete objects in tests. Race detector on all runs.
-- **Pre-commit**: Runs `make check` (tidy, vet, lint, per-package coverage, build). All must pass.
+- **Pre-commit**: Runs `make check` (tidy, vet, lint, antislop, per-package coverage, build). All must pass.
+- **Anti-slop**: `make antislop` must pass. A rule joins `ANTISLOP_ENFORCED` in the Makefile when `make antislop-all` reports zero findings for it. The goal is every rule.
 - **Commits**: Conventional Commits format (`<type>[optional scope]: <description>`). Imperative mood, start capitalized, no trailing period.
 - **All changes go through PRs.** Never push directly to main.
 - **All code, comments, test data, and documentation must be in English.**
