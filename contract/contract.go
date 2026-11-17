@@ -9,8 +9,13 @@ type DataContract struct {
 	ContractType string           `json:"contract_type"`
 	ID           string           `json:"id"`
 	Schemas      []SchemaContract `json:"schemas"`
-	Metadata     map[string]any   `json:"metadata,omitempty"`
+	Metadata     Metadata         `json:"metadata,omitempty"`
 }
+
+// Metadata holds source-specific facts such as the file format, the
+// decimal mark, or sheet issues. It is a map because each analyzer
+// records its own keys, and the values are free-form JSON.
+type Metadata map[string]any
 
 // SchemaContract describes a single schema within a data endpoint:
 // a database table, an API endpoint, or a file structure.
@@ -23,7 +28,7 @@ type SchemaContract struct {
 	SampleData      [][]string        `json:"sample_data,omitempty"`
 	ValidationRules ValidationRules   `json:"validation_rules"`
 	Issues          []string          `json:"issues,omitempty"`
-	Metadata        map[string]any    `json:"metadata,omitempty"`
+	Metadata        Metadata          `json:"metadata,omitempty"`
 }
 
 // FieldDefinition describes a single field in a schema.

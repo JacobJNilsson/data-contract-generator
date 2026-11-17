@@ -95,7 +95,7 @@ func analyzeJSONArray(ctx context.Context, r io.Reader, opts *Options) (*SourceC
 			break
 		}
 
-		var obj map[string]any
+		var obj jsonObject
 		if err := dec.Decode(&obj); err != nil {
 			state.issues = append(state.issues, fmt.Sprintf("object %d: %s", state.totalRows+1, err))
 			// Decode errors are unrecoverable for the JSON decoder —
@@ -129,7 +129,7 @@ func analyzeNDJSON(ctx context.Context, r io.Reader, opts *Options) (*SourceCont
 			continue
 		}
 
-		var obj map[string]any
+		var obj jsonObject
 		if err := json.Unmarshal([]byte(line), &obj); err != nil {
 			state.issues = append(state.issues, fmt.Sprintf("line %d: %s", state.totalRows+1, err))
 			continue
@@ -168,7 +168,11 @@ func newAnalysisState(opts *Options) *analysisState {
 	}
 }
 
-func (s *analysisState) observe(obj map[string]any) {
+// jsonObject is one decoded JSON object. It is a map because the keys are
+// the data under analysis and are unknown until the file is read.
+type jsonObject map[string]any
+
+func (s *analysisState) observe(obj jsonObject) {
 	s.totalRows++
 
 	// Discover new fields (preserving insertion order).

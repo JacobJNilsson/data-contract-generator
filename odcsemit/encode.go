@@ -91,7 +91,7 @@ func EnumProperty(name, enumTypeName string, labels []string) odcs.Property {
 				ID:     name + "_valid_values",
 				Type:   odcs.QualityLibrary,
 				Metric: odcs.MetricInvalidValues,
-				Arguments: map[string]any{
+				Arguments: odcs.QualityArguments{
 					"validValues": values,
 				},
 				MustBe: zero,

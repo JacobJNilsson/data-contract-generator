@@ -188,8 +188,8 @@ func DeclaredTables(f *excelize.File, sheet string) []DeclaredTable {
 // is advice for the planner and the authoring agent, never identity:
 // the fingerprint reads none of these keys except through the parse
 // profile's has_header.
-func tableMetadata(t Segment, hidden bool) map[string]any {
-	md := map[string]any{
+func tableMetadata(t Segment, hidden bool) contract.Metadata {
+	md := contract.Metadata{
 		"anchor":     cellName(t.StartRow, t.StartCol),
 		"range":      rangeRef(t.StartRow, t.StartCol, t.EndRow, t.EndCol),
 		"detection":  t.Detection,

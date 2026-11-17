@@ -4,7 +4,9 @@ ANTISLOP := go run github.com/JacobJNilsson/anti-slop-go/cmd/antislop@v1.4.1
 
 # A rule joins this list when `make antislop-all` reports zero findings for it.
 # The goal is every rule.
-ANTISLOP_ENFORCED := -nolaundering -noerrorassert -noreflect -nomonkeypatch -safetyassert -separategotwant
+ANTISLOP_ENFORCED := -nolaundering -noerrorassert -noreflect -nomonkeypatch -safetyassert -separategotwant \
+	-nountypedmap -nointerfacereturn -noadhoctypeswitch \
+	-noadhoctypeswitch.boundary=github.com/JacobJNilsson/data-contract-generator/jsoncontract,github.com/JacobJNilsson/data-contract-generator/odcs
 
 # Pinned Python toolchain for the declared-schema importer (declimport).
 # Kept out of `make check` on purpose: the declimport unit tests run against

@@ -228,10 +228,14 @@ func ForeignKeys(props []CustomProperty) []ForeignKey {
 // an any target is map[string]any too (yaml.v3 uses string keys for
 // string-keyed mappings), so both forms are handled and anything else yields
 // ok=false.
-func asStringMap(v any) (map[string]any, bool) {
+func asStringMap(v any) (customProperty, bool) {
 	m, ok := v.(map[string]any)
-	return m, ok
+	return customProperty(m), ok
 }
+
+// customProperty is one decoded customProperty entry. It is a map because
+// the entry is a free-form ODCS mapping read at the decode boundary.
+type customProperty map[string]any
 
 // asStringList coerces a value to a string slice, accepting both []string (the
 // in-memory build) and []any of strings (the decoded form). A non-list or a
