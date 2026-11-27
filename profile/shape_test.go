@@ -3,7 +3,11 @@ package profile
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
 func TestFormatMask(t *testing.T) {
@@ -110,6 +114,35 @@ func TestShapeSignatureOverflowBucket(t *testing.T) {
 	}
 	if fsig.DriftsFrom(observeAll("P-1", "P-2")) {
 		t.Error("a signature without a clear dominant must never report drift")
+	}
+}
+
+// TestShapeContractRoundTrip: a signature copied into the contract type
+// and back equals the original, both for a column without values and for
+// a column whose masks overflow.
+func TestShapeContractRoundTrip(t *testing.T) {
+	var overflowing shapeTracker
+	for i := 0; i <= maxTrackedMasks; i++ {
+		overflowing.observe(strings.Repeat("a-", i) + "1")
+	}
+	for _, want := range []ShapeSignature{observeAll(), overflowing.signature()} {
+		got := ShapeFromContract(want.Contract())
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("round trip = %+v, want %+v", got, want)
+		}
+	}
+}
+
+func TestShapeContract(t *testing.T) {
+	got := observeAll("P-600", "P-601", "x").Contract()
+	want := contract.ShapeSignature{
+		Masks:         []contract.MaskCount{{Mask: "A-9", Count: 2}, {Mask: "A", Count: 1}},
+		DominantShare: 0.67,
+		LengthMin:     1,
+		LengthMax:     5,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Contract() = %+v, want %+v", got, want)
 	}
 }
 
