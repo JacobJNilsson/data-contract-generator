@@ -19,7 +19,7 @@ type ColumnProfiler struct {
 	maxTracked int
 	capped     bool
 	tracker    RangeTracker
-	shape      shapeTracker
+	shape      ShapeTracker
 	decimal    DecimalEvidence
 }
 
@@ -42,7 +42,7 @@ func (p *ColumnProfiler) Observe(value string) {
 	}
 
 	p.tracker.Observe(value)
-	p.shape.observe(value)
+	p.shape.Observe(value)
 	p.decimal.Observe(value)
 
 	if count, exists := p.freqs[value]; exists {
@@ -85,7 +85,7 @@ func (p *ColumnProfiler) Finish(topN int) FieldProfile {
 		MinValue:            minVal,
 		MaxValue:            maxVal,
 		TopValues:           p.topValues(topN),
-		Shape:               p.shape.signature(),
+		Shape:               p.shape.Signature(),
 	}
 }
 
