@@ -86,9 +86,9 @@ func FormatMask(value string) string {
 	return b.String()
 }
 
-// shapeTracker accumulates mask statistics inside ColumnProfiler's
-// existing single pass.
-type shapeTracker struct {
+// ShapeTracker accumulates the mask statistics of one column, one value
+// at a time. Its zero value is ready to use.
+type ShapeTracker struct {
 	masks    map[string]int
 	total    int
 	lenMin   int
@@ -97,13 +97,19 @@ type shapeTracker struct {
 	overflow int
 }
 
-// observe records one non-null value's mask and length.
-func (t *shapeTracker) observe(value string) {
+// Observe records one non-null value's mask and rune length.
+func (t *ShapeTracker) Observe(value string) {
+	t.ObserveMask(FormatMask(value), len([]rune(value)))
+}
+
+// ObserveMask records one non-null value whose mask the caller computed,
+// such as the typed token of an Excel cell. Length is the value's rune
+// length.
+func (t *ShapeTracker) ObserveMask(mask string, length int) {
 	if t.masks == nil {
 		t.masks = make(map[string]int)
 	}
 	t.total++
-	length := len([]rune(value))
 	if !t.seenAny || length < t.lenMin {
 		t.lenMin = length
 	}
@@ -112,7 +118,6 @@ func (t *shapeTracker) observe(value string) {
 	}
 	t.seenAny = true
 
-	mask := FormatMask(value)
 	if _, exists := t.masks[mask]; exists {
 		t.masks[mask]++
 		return
@@ -124,8 +129,9 @@ func (t *shapeTracker) observe(value string) {
 	t.overflow++
 }
 
-// signature renders the accumulated state deterministically.
-func (t *shapeTracker) signature() ShapeSignature {
+// Signature renders the accumulated state, with the masks sorted by
+// count descending and then by mask, so equal input gives equal output.
+func (t *ShapeTracker) Signature() ShapeSignature {
 	masks := make([]MaskCount, 0, len(t.masks)+1)
 	for m, c := range t.masks {
 		masks = append(masks, MaskCount{Mask: m, Count: c})

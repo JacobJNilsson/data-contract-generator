@@ -34,11 +34,11 @@ func TestFormatMask(t *testing.T) {
 // observeAll runs values through a fresh tracker and returns its
 // signature.
 func observeAll(values ...string) ShapeSignature {
-	var tr shapeTracker
+	var tr ShapeTracker
 	for _, v := range values {
-		tr.observe(v)
+		tr.Observe(v)
 	}
-	return tr.signature()
+	return tr.Signature()
 }
 
 func TestShapeSignature(t *testing.T) {
@@ -69,7 +69,7 @@ func TestShapeSignatureRuneLengths(t *testing.T) {
 }
 
 func TestShapeSignatureOverflowBucket(t *testing.T) {
-	var tr shapeTracker
+	var tr ShapeTracker
 	// 32 distinct masks fill the table; two more land in the bucket.
 	for i := 0; i < maxTrackedMasks; i++ {
 		// Distinct run patterns: "9", "9-9", "9-9-9", ... give unique masks.
@@ -77,11 +77,11 @@ func TestShapeSignatureOverflowBucket(t *testing.T) {
 		for j := 0; j < i; j++ {
 			v += "-" + fmt.Sprint(j%10)
 		}
-		tr.observe(v)
+		tr.Observe(v)
 	}
-	tr.observe("!@#$%^")
-	tr.observe("([{}])")
-	sig := tr.signature()
+	tr.Observe("!@#$%^")
+	tr.Observe("([{}])")
+	sig := tr.Signature()
 	var overflow *MaskCount
 	for i := range sig.Masks {
 		if sig.Masks[i].Mask == overflowMask {
@@ -94,18 +94,18 @@ func TestShapeSignatureOverflowBucket(t *testing.T) {
 
 	// A signature whose top entry is the overflow bucket has no clear
 	// dominant and never drifts.
-	var flooded shapeTracker
+	var flooded ShapeTracker
 	for i := 0; i < maxTrackedMasks; i++ {
 		v := "1"
 		for j := 0; j < i; j++ {
 			v += "-" + fmt.Sprint(j%10)
 		}
-		flooded.observe(v)
+		flooded.Observe(v)
 	}
 	for i := 0; i < 50; i++ {
-		flooded.observe("!@#$%^")
+		flooded.Observe("!@#$%^")
 	}
-	fsig := flooded.signature()
+	fsig := flooded.Signature()
 	if fsig.Masks[0].Mask != overflowMask {
 		t.Fatalf("flooded top mask = %q, want the overflow bucket", fsig.Masks[0].Mask)
 	}
@@ -117,15 +117,52 @@ func TestShapeSignatureOverflowBucket(t *testing.T) {
 	}
 }
 
+// TestShapeTrackerObserveMask: a caller-computed mask counts as given,
+// and the caller's length sets the length range.
+func TestShapeTrackerObserveMask(t *testing.T) {
+	var tr ShapeTracker
+	tr.ObserveMask("number 9.9", 4)
+	tr.ObserveMask("number 9.9", 7)
+	tr.ObserveMask("text A", 2)
+	got := tr.Signature()
+	want := ShapeSignature{
+		Masks:         []MaskCount{{Mask: "number 9.9", Count: 2}, {Mask: "text A", Count: 1}},
+		DominantShare: 0.67,
+		LengthMin:     2,
+		LengthMax:     7,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Signature() = %+v, want %+v", got, want)
+	}
+}
+
+// TestShapeTrackerObserve: three values give the whole signature.
+func TestShapeTrackerObserve(t *testing.T) {
+	var tr ShapeTracker
+	for _, v := range []string{"P-600", "P-61", "Axel"} {
+		tr.Observe(v)
+	}
+	got := tr.Signature()
+	want := ShapeSignature{
+		Masks:         []MaskCount{{Mask: "A-9", Count: 2}, {Mask: "A", Count: 1}},
+		DominantShare: 0.67,
+		LengthMin:     4,
+		LengthMax:     5,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Signature() = %+v, want %+v", got, want)
+	}
+}
+
 // TestShapeContractRoundTrip: a signature copied into the contract type
 // and back equals the original, both for a column without values and for
 // a column whose masks overflow.
 func TestShapeContractRoundTrip(t *testing.T) {
-	var overflowing shapeTracker
+	var overflowing ShapeTracker
 	for i := 0; i <= maxTrackedMasks; i++ {
-		overflowing.observe(strings.Repeat("a-", i) + "1")
+		overflowing.Observe(strings.Repeat("a-", i) + "1")
 	}
-	for _, want := range []ShapeSignature{observeAll(), overflowing.signature()} {
+	for _, want := range []ShapeSignature{observeAll(), overflowing.Signature()} {
 		got := ShapeFromContract(want.Contract())
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("round trip = %+v, want %+v", got, want)
