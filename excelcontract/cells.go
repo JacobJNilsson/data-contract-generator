@@ -57,7 +57,7 @@ func LocateTable(f *excelize.File, locator string) (string, Segment, error) {
 // Ordinal 0 asks for the only table of a one-table sheet. An ordinal of
 // 1 or more asks for that table of a sheet with several tables.
 func sheetTable(f *excelize.File, sheet string, ordinal int) (Segment, bool) {
-	rows, err := f.GetRows(sheet)
+	rows, err := SheetRows(f, sheet)
 	if err != nil {
 		return Segment{}, false
 	}
@@ -80,39 +80,125 @@ func ColumnCells(f *excelize.File, sheet string, seg Segment, column, limit int)
 	if column < 0 || column > seg.EndCol-seg.StartCol {
 		return nil, fmt.Errorf("column %d is outside the table's %d columns", column, seg.EndCol-seg.StartCol+1)
 	}
-	rows, err := f.GetRows(sheet)
-	if err != nil {
-		return nil, fmt.Errorf("read rows: %w", err)
-	}
-	s, err := newSheetCells(f, sheet, rows)
+	s, err := readSheetCells(f, sheet)
 	if err != nil {
 		return nil, err
 	}
 	return s.tableCells(s.shapeRows(seg), seg.StartCol+column, limit)
 }
 
-// sheetCells reads the cells of one sheet. It holds the display grid and
-// the raw grid, which share their coordinates, and a cache from style ID
-// to whether the style's number format is a date format.
+// SheetRows returns the typed grid of a sheet: each cell's text as its
+// stored type renders it, not as its number format displays it. A
+// number reads "126", not "$ 126", and a date serial reads "1995-01-01",
+// not "Jan-95". A caller who segments a sheet must pass SheetRows, not
+// f.GetRows, to SegmentSheet to get the tables that the analysis finds.
+func SheetRows(f *excelize.File, sheet string) ([][]string, error) {
+	s, err := readSheetCells(f, sheet)
+	if err != nil {
+		return nil, err
+	}
+	return s.typed, nil
+}
+
+// readSheetCells reads a sheet's display grid and builds its sheetCells.
+// The analysis, SheetRows and ColumnCells all read a sheet through it.
+func readSheetCells(f *excelize.File, sheet string) (*sheetCells, error) {
+	rows, err := f.GetRows(sheet)
+	if err != nil {
+		return nil, fmt.Errorf("read rows: %w", err)
+	}
+	return newSheetCells(f, sheet, rows)
+}
+
+// sheetCells reads the cells of one sheet. It holds the display grid, the
+// raw grid and the typed grid, which share their coordinates, and a cache
+// from style ID to whether the style's number format is a date format.
 type sheetCells struct {
 	f          *excelize.File
 	sheet      string
 	rows       [][]string
 	raw        [][]string
+	typed      [][]string
 	dateStyles map[int]bool
 }
 
-// newSheetCells reads the raw grid of a sheet beside its display grid.
-// With RawCellValue, excelize returns each value as the file stores it:
-// a number as written, such as "1500.5" or "1.5E-3", a boolean as "1" or
-// "0", a cell of type d as ISO text, and a formula without a cached value
-// as "".
+// newSheetCells reads the raw grid of a sheet beside its display grid and
+// builds the typed grid from both. With RawCellValue, excelize returns
+// each value as the file stores it: a number as written, such as "1500.5"
+// or "1.5E-3", a boolean as "1" or "0", a cell of type d as ISO text, and
+// a formula without a cached value as "".
 func newSheetCells(f *excelize.File, sheet string, rows [][]string) (*sheetCells, error) {
 	raw, err := f.GetRows(sheet, excelize.Options{RawCellValue: true})
 	if err != nil {
 		return nil, fmt.Errorf("read raw rows: %w", err)
 	}
-	return &sheetCells{f: f, sheet: sheet, rows: rows, raw: raw, dateStyles: map[int]bool{}}, nil
+	// A workbook without a workbookPr element reads as the 1900 date system.
+	date1904 := false
+	if props, err := f.GetWorkbookProps(); err == nil && props.Date1904 != nil {
+		date1904 = *props.Date1904
+	}
+	s := &sheetCells{f: f, sheet: sheet, rows: rows, raw: raw, dateStyles: map[int]bool{}}
+	if s.typed, err = s.typedGrid(date1904); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// typedGrid renders each cell of the display grid by its kind. A cell
+// whose raw value is empty or equals its display text keeps the display
+// text without a call to cellKindOf, so only formatted cells cost a style
+// lookup. A number with the General format displays its raw value, so the
+// shortcut gives the same text as typedValue would.
+func (s *sheetCells) typedGrid(date1904 bool) ([][]string, error) {
+	typed := make([][]string, len(s.rows))
+	for r, row := range s.rows {
+		typed[r] = make([]string, len(row))
+		for c, display := range row {
+			raw := gridCell(s.raw, r, c)
+			if raw == "" || raw == display {
+				typed[r][c] = display
+				continue
+			}
+			ref := cellName(r, c)
+			kind, err := s.cellKindOf(ref)
+			if err != nil {
+				return nil, fmt.Errorf("cell %s: %w", ref, err)
+			}
+			typed[r][c] = typedValue(kind, raw, display, date1904)
+		}
+	}
+	return typed, nil
+}
+
+// typedValue returns the typed text of one cell. A number reads as its
+// shortest decimal form, so "9.3000000000000007" reads "9.3". A date
+// serial reads as an ISO date, or as an ISO timestamp when it holds a
+// time of day. A raw value that is no number, such as the ISO text of a
+// cell of type d, keeps its raw text. Text and error cells keep their
+// display text.
+func typedValue(kind cellKind, raw, display string, date1904 bool) string {
+	switch kind {
+	case kindBool:
+		return strconv.FormatBool(raw == "1")
+	case kindNumber, kindDate:
+	default:
+		return display
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return raw
+	}
+	if kind == kindNumber {
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	t, err := excelize.ExcelDateToTime(v, date1904)
+	if err != nil {
+		return display
+	}
+	if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+		return t.Format("2006-01-02")
+	}
+	return t.Format("2006-01-02 15:04:05")
 }
 
 // shapeRows returns the sheet indices of the table's first MaxShapeRows
