@@ -68,7 +68,10 @@ type Segmentation struct {
 // when a multi-cell row follows. A leading row of two adjacent text cells,
 // such as a report code and its title, is also caption when the first
 // table row below holds at least five free cells. A band that is a single
-// stray cell is recorded as an issue, not invented as a table.
+// stray cell is recorded as an issue, not invented as a table. A
+// heuristic table that spans one column of text, such as a block of
+// footnotes, is also recorded as an issue when the sheet holds a table of
+// two or more columns.
 //
 // The segmenter is deterministic and order-stable: same cells and same
 // declared tables produce the same segmentation. It is exported because
@@ -87,15 +90,23 @@ func SegmentSheet(rows [][]string, declared []DeclaredTable) Segmentation {
 			out.Tables = append(out.Tables, *seg)
 		}
 	}
-	bands := freeRowBands(grid)
-	for _, b := range bands {
+	var heuristic []Segment
+	for _, b := range freeRowBands(grid) {
 		seg, issue := heuristicSegment(grid, b)
 		if issue != "" {
 			out.Issues = append(out.Issues, issue)
 		}
 		if seg != nil {
-			out.Tables = append(out.Tables, *seg)
+			heuristic = append(heuristic, *seg)
 		}
+	}
+	wide := hasWideTable(out.Tables) || hasWideTable(heuristic)
+	for _, seg := range heuristic {
+		if wide && textBlock(grid, seg) {
+			out.Issues = append(out.Issues, fmt.Sprintf("text block at %s is one column of text beside a wider table; it was not read as a table", rangeRef(seg.StartRow, seg.StartCol, seg.EndRow, seg.EndCol)))
+			continue
+		}
+		out.Tables = append(out.Tables, seg)
 	}
 	// XL-2: ordinals are assigned in row-major order of each table's
 	// top-left anchor, Table-object and heuristic tables together.
@@ -286,6 +297,36 @@ func heuristicSegment(g *occupancy, b band) (*Segment, string) {
 		StartCol:  startCol,
 		EndCol:    endCol,
 	}, ""
+}
+
+// hasWideTable reports whether any of the segments spans two or more
+// columns.
+func hasWideTable(segs []Segment) bool {
+	for _, s := range segs {
+		if s.EndCol > s.StartCol {
+			return true
+		}
+	}
+	return false
+}
+
+// textBlock reports whether a segment spans one column and its data cells
+// merge to text, such as a block of footnotes below a table. The header
+// cell does not count, so a column of numbers under a text header is no
+// text block.
+func textBlock(g *occupancy, seg Segment) bool {
+	if seg.StartCol != seg.EndCol {
+		return false
+	}
+	start := seg.StartRow
+	if seg.HasHeader {
+		start++
+	}
+	merged := profile.TypeEmpty
+	for r := start; r <= seg.EndRow; r++ {
+		merged = profile.MergeTypes(merged, profile.ClassifyCell(g.value(r, seg.StartCol)))
+	}
+	return merged == profile.TypeText
 }
 
 // minLabelPairTableWidth is the fewest free cells that a band's first
