@@ -88,7 +88,7 @@ func ColumnCells(f *excelize.File, sheet string, seg Segment, column, limit int)
 	if err != nil {
 		return nil, err
 	}
-	return s.tableCells(seg, column, limit)
+	return s.tableCells(s.shapeRows(seg), seg.StartCol+column, limit)
 }
 
 // sheetCells reads the cells of one sheet. It holds the display grid and
@@ -115,24 +115,37 @@ func newSheetCells(f *excelize.File, sheet string, rows [][]string) (*sheetCells
 	return &sheetCells{f: f, sheet: sheet, rows: rows, raw: raw, dateStyles: map[int]bool{}}, nil
 }
 
-// tableCells is the one reader of a table's cells and tokens. It returns
-// up to limit non-null cells of one column. It reads at most the first
-// MaxShapeRows data rows and skips a row that is blank across the table,
-// as buildTableSchema does. A cell with an empty raw value is null.
-func (s *sheetCells) tableCells(seg Segment, column, limit int) ([]Cell, error) {
+// shapeRows returns the sheet indices of the table's first MaxShapeRows
+// data rows. It skips a row that is blank across the table, as
+// buildTableSchema does. A caller computes the rows once per table and
+// passes them to tableCells for each column.
+func (s *sheetCells) shapeRows(seg Segment) []int {
 	start := seg.StartRow
 	if seg.HasHeader {
 		start++
 	}
-	col := seg.StartCol + column
-	var cells []Cell
-	dataRows := 0
-	for r := start; r <= seg.EndRow && dataRows < MaxShapeRows && len(cells) < limit; r++ {
-		if isEmptyRow(cellRange(s.rows, r, seg.StartCol, seg.EndCol)) {
-			continue
+	var rows []int
+	for r := start; r <= seg.EndRow && len(rows) < MaxShapeRows; r++ {
+		for c := seg.StartCol; c <= seg.EndCol; c++ {
+			if strings.TrimSpace(gridCell(s.rows, r, c)) != "" {
+				rows = append(rows, r)
+				break
+			}
 		}
-		dataRows++
-		raw := cellRange(s.raw, r, col, col)[0]
+	}
+	return rows
+}
+
+// tableCells is the one reader of a table's cells and tokens. It returns
+// up to limit non-null cells of sheet column col, in the given rows from
+// shapeRows. A cell with an empty raw value is null.
+func (s *sheetCells) tableCells(rows []int, col, limit int) ([]Cell, error) {
+	var cells []Cell
+	for _, r := range rows {
+		if len(cells) >= limit {
+			break
+		}
+		raw := gridCell(s.raw, r, col)
 		if raw == "" {
 			continue
 		}
@@ -143,12 +156,21 @@ func (s *sheetCells) tableCells(seg Segment, column, limit int) ([]Cell, error) 
 		}
 		cells = append(cells, Cell{
 			Ref:   ref,
-			Value: cellRange(s.rows, r, col, col)[0],
+			Value: gridCell(s.rows, r, col),
 			Raw:   raw,
 			Token: cellToken(kind, raw),
 		})
 	}
 	return cells, nil
+}
+
+// gridCell returns one cell of a GetRows grid, or "" outside it, because
+// GetRows trims a row after its last non-empty cell.
+func gridCell(grid [][]string, r, c int) string {
+	if r < 0 || r >= len(grid) || c < 0 || c >= len(grid[r]) {
+		return ""
+	}
+	return grid[r][c]
 }
 
 // cellKind is the type of a cell's stored value, as the shape token

@@ -281,12 +281,13 @@ func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.Sc
 
 	fields := make([]contract.FieldDefinition, numFields)
 	var evidence []profile.DecimalEvidence
+	shapeRows := cells.shapeRows(t)
 	for i, name := range fieldNames {
 		fp := profilers[i].Finish(topN)
 		if colTypes[i] == profile.TypeNumeric {
 			evidence = append(evidence, profilers[i].Decimal())
 		}
-		shapeCells, err := cells.tableCells(t, i, MaxShapeRows)
+		shapeCells, err := cells.tableCells(shapeRows, t.StartCol+i, MaxShapeRows)
 		if err != nil {
 			return nil, nil, err
 		}
