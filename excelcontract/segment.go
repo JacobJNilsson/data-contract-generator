@@ -65,8 +65,10 @@ type Segmentation struct {
 // full range (header row and column bounds), then the remaining cells
 // are segmented heuristically into row bands separated by blank rows.
 // Leading single-cell rows of a band are absorbed as the table's caption
-// when a multi-cell row follows; a band that is a single stray cell is
-// recorded as an issue, not invented as a table.
+// when a multi-cell row follows. A leading row of two adjacent text cells,
+// such as a report code and its title, is also caption when the first
+// table row below holds at least five free cells. A band that is a single
+// stray cell is recorded as an issue, not invented as a table.
 //
 // The segmenter is deterministic and order-stable: same cells and same
 // declared tables produce the same segmentation. It is exported because
@@ -244,24 +246,10 @@ func freeRowBands(g *occupancy) []band {
 // leading caption and refusing to invent a table from a stray cell.
 func heuristicSegment(g *occupancy, b band) (*Segment, string) {
 	w := g.width()
-	// Caption absorption (XL §4-4): every leading row of the band that
-	// holds exactly one free cell is caption, provided a wider (multi-
-	// cell) row follows in the band. Lookahead over the whole band, not
-	// just the next row: multi-row titles are common in real workbooks.
-	firstMulti := -1
-	for r := b.startRow; r <= b.endRow; r++ {
-		if freeCellCount(g, r, w) > 1 {
-			firstMulti = r
-			break
-		}
-	}
-	startRow := b.startRow
+	startRow := captionEnd(g, b, w)
 	var captions []string
-	if firstMulti > b.startRow {
-		for r := b.startRow; r < firstMulti; r++ {
-			captions = append(captions, singleFreeCellValue(g, r, w))
-		}
-		startRow = firstMulti
+	for r := b.startRow; r < startRow; r++ {
+		captions = append(captions, rowText(g, r, w))
 	}
 	// Column extent over the table rows only: a caption cell may sit
 	// outside the columns the table itself occupies.
@@ -298,6 +286,79 @@ func heuristicSegment(g *occupancy, b band) (*Segment, string) {
 		StartCol:  startCol,
 		EndCol:    endCol,
 	}, ""
+}
+
+// minLabelPairTableWidth is the fewest free cells that a band's first
+// table row holds when a label pair above it is caption. A narrower table
+// keeps its two-cell rows, because a two-column table's header is also
+// two adjacent text cells.
+const minLabelPairTableWidth = 5
+
+// captionEnd returns the first table row of a band. The rows above it are
+// caption (XL §4-4). A leading row is caption when it holds one free
+// cell, or when it is a label pair over a first table row of at least
+// minLabelPairTableWidth free cells. Without such a wide row, only the
+// leading one-cell rows are caption, and only when a multi-cell row
+// follows. The lookahead runs over the whole band, not only the next
+// row, because multi-row titles are common in real workbooks.
+func captionEnd(g *occupancy, b band, w int) int {
+	pairs := false
+	for r := b.startRow; r <= b.endRow; r++ {
+		n := freeCellCount(g, r, w)
+		if n == 1 {
+			continue
+		}
+		if labelPair(g, r, w) {
+			pairs = true
+			continue
+		}
+		if !pairs || n >= minLabelPairTableWidth {
+			return r
+		}
+		break
+	}
+	for r := b.startRow; r <= b.endRow; r++ {
+		if freeCellCount(g, r, w) > 1 {
+			return r
+		}
+	}
+	return b.startRow
+}
+
+// labelPair reports whether the row holds exactly two free cells, side by
+// side, that both classify as text, such as a report code and its title.
+func labelPair(g *occupancy, r, width int) bool {
+	var cols []int
+	for c := 0; c < width; c++ {
+		if !g.free(r, c) {
+			continue
+		}
+		if len(cols) == 2 {
+			return false
+		}
+		cols = append(cols, c)
+	}
+	if len(cols) != 2 || cols[1] != cols[0]+1 {
+		return false
+	}
+	for _, c := range cols {
+		if profile.ClassifyCell(strings.TrimSpace(g.value(r, c))) != profile.TypeText {
+			return false
+		}
+	}
+	return true
+}
+
+// rowText returns the row's free cells, trimmed and joined with one
+// space, as one line of a caption.
+func rowText(g *occupancy, r, width int) string {
+	var cells []string
+	for c := 0; c < width; c++ {
+		if g.free(r, c) {
+			cells = append(cells, strings.TrimSpace(g.value(r, c)))
+		}
+	}
+	return strings.Join(cells, " ")
 }
 
 // freeCellCount counts the row's free cells.
