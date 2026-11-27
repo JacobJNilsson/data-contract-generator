@@ -27,7 +27,71 @@ func main() {
 	genHeaderlessTable()
 	genMergedCaption()
 	genTypedCells()
+	genFormattedCells()
 	fmt.Println("All test fixtures generated.")
+}
+
+// genFormattedCells writes numbers and dates whose number formats make
+// the display text differ from the stored value. Each column checks that
+// the analysis reads the stored value:
+//
+//   - Lodging: numbers under the custom format "$"\ #,##0, displayed as
+//     "$ 126".
+//   - Price: numbers under built-in format 3 (#,##0), displayed as
+//     "90,347".
+//   - Area: fractions under built-in format 1 (0), displayed rounded.
+//   - Month: date serials under built-in format 17 (mmm-yy).
+//   - Day: date serials under built-in format 14.
+//   - Done: booleans.
+//   - Note: text.
+func genFormattedCells() {
+	f := excelize.NewFile()
+	defer f.Close()
+
+	style := func(s *excelize.Style) int {
+		id, err := f.NewStyle(s)
+		must(err)
+		return id
+	}
+	dollars := `"$"\ #,##0`
+	lodging := style(&excelize.Style{CustomNumFmt: &dollars})
+	thousands := style(&excelize.Style{NumFmt: 3})
+	whole := style(&excelize.Style{NumFmt: 1})
+	month := style(&excelize.Style{NumFmt: 17})
+	day := style(&excelize.Style{NumFmt: 14})
+
+	f.SetSheetRow("Sheet1", "A1", &[]any{"Lodging", "Price", "Area", "Month", "Day", "Done", "Note"})
+	rows := []struct {
+		lodging float64
+		price   float64
+		area    float64
+		month   float64
+		day     float64
+		done    bool
+		note    string
+	}{
+		{126, 90347, 15.83, 34700, 45293, true, "first"},
+		{110, 81213, 146.77, 34731, 45296, false, "second"},
+		{98, 85120, 72.5, 34759, 45300, true, "third"},
+	}
+	for i, r := range rows {
+		row := i + 2
+		cell := func(col string) string { return fmt.Sprintf("%s%d", col, row) }
+		set := func(col string, v any, styleID int) {
+			f.SetCellValue("Sheet1", cell(col), v)
+			must(f.SetCellStyle("Sheet1", cell(col), cell(col), styleID))
+		}
+		set("A", r.lodging, lodging)
+		set("B", r.price, thousands)
+		set("C", r.area, whole)
+		set("D", r.month, month)
+		set("E", r.day, day)
+		f.SetCellValue("Sheet1", cell("F"), r.done)
+		f.SetCellStr("Sheet1", cell("G"), r.note)
+	}
+
+	must(f.SaveAs("excelcontract/testdata/formatted-cells.xlsx"))
+	fmt.Println("  formatted-cells.xlsx")
 }
 
 // genTypedCells writes typed cells for the cell tokens of the field shape.
