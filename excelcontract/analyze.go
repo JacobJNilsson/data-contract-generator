@@ -139,11 +139,17 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 	visible, visErr := f.GetSheetVisible(sheet)
 	hidden := visErr == nil && !visible
 
-	cells := sheetCells{rows: rows}
+	cells, err := newSheetCells(f, sheet, rows)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var schemas []contract.SchemaContract
 	var decimals []profile.DecimalEvidence
 	for ordinal, t := range seg.Tables {
-		sc, evidence := buildTableSchema(&cells, t, opts)
+		sc, evidence, err := buildTableSchema(cells, t, opts)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if sc == nil {
 			issues = append(issues, fmt.Sprintf("table at %s has a header but no data rows; no schema was emitted for it", cellName(t.StartRow, t.StartCol)))
 			continue
@@ -213,7 +219,7 @@ func tableMetadata(t Segment, hidden bool) contract.Metadata {
 // records that loudly. The second result is the decimal evidence of each
 // numeric column. Each field's shape counts the cell tokens of
 // tableCells, so the shape and ColumnCells share one token rule.
-func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence) {
+func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence, error) {
 	rows := cells.rows
 	numFields := t.EndCol - t.StartCol + 1
 	var fieldNames []string
@@ -270,7 +276,7 @@ func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.Sc
 	}
 
 	if totalRows == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	fields := make([]contract.FieldDefinition, numFields)
@@ -280,7 +286,11 @@ func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.Sc
 		if colTypes[i] == profile.TypeNumeric {
 			evidence = append(evidence, profilers[i].Decimal())
 		}
-		shape := cellShape(cells.tableCells(t, i, MaxShapeRows)).Contract()
+		shapeCells, err := cells.tableCells(t, i, MaxShapeRows)
+		if err != nil {
+			return nil, nil, err
+		}
+		shape := cellShape(shapeCells).Contract()
 		fields[i] = contract.FieldDefinition{
 			Name:     name,
 			DataType: string(colTypes[i]),
@@ -308,7 +318,7 @@ func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.Sc
 		ValidationRules: contract.ValidationRules{
 			RequiredFields: requiredFields(fields),
 		},
-	}, evidence
+	}, evidence, nil
 }
 
 // cellRange extracts row cells over inclusive column bounds, padding a

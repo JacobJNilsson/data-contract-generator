@@ -43,9 +43,9 @@ func TestAnalyzeHeaderlessTableShapes(t *testing.T) {
 	}
 	got := fieldShapes(t, dc.Schemas[0])
 	want := []contract.ShapeSignature{
-		{Masks: []contract.MaskCount{{Mask: "A-9", Count: 3}}, DominantShare: 1, LengthMin: 5, LengthMax: 5},
-		{Masks: []contract.MaskCount{{Mask: "9.9", Count: 2}, {Mask: "9", Count: 1}}, DominantShare: 0.67, LengthMin: 3, LengthMax: 5},
-		{Masks: []contract.MaskCount{{Mask: "9-9-9", Count: 3}}, DominantShare: 1, LengthMin: 10, LengthMax: 10},
+		{Masks: []contract.MaskCount{{Mask: "text A-9", Count: 3}}, DominantShare: 1, LengthMin: 5, LengthMax: 5},
+		{Masks: []contract.MaskCount{{Mask: "number 9.9", Count: 2}, {Mask: "number 9", Count: 1}}, DominantShare: 0.67, LengthMin: 3, LengthMax: 5},
+		{Masks: []contract.MaskCount{{Mask: "text 9-9-9", Count: 3}}, DominantShare: 1, LengthMin: 10, LengthMax: 10},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("shapes = %+v, want %+v", got, want)
@@ -71,7 +71,7 @@ func TestShapeCountsAtMostMaxShapeRows(t *testing.T) {
 	}
 	got := *dc.Schemas[0].Fields[0].Profile.Shape
 	want := contract.ShapeSignature{
-		Masks:         []contract.MaskCount{{Mask: "A", Count: MaxShapeRows}},
+		Masks:         []contract.MaskCount{{Mask: "text A", Count: MaxShapeRows}},
 		DominantShare: 1,
 		LengthMin:     3,
 		LengthMax:     3,
@@ -153,8 +153,8 @@ func TestColumnCells(t *testing.T) {
 		t.Fatalf("ColumnCells: %v", err)
 	}
 	want := []Cell{
-		{Ref: "A1", Value: "P-600", Raw: "P-600", Token: "A-9"},
-		{Ref: "A2", Value: "P-601", Raw: "P-601", Token: "A-9"},
+		{Ref: "A1", Value: "P-600", Raw: "P-600", Token: "text A-9"},
+		{Ref: "A2", Value: "P-601", Raw: "P-601", Token: "text A-9"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ColumnCells = %+v, want %+v", got, want)
@@ -177,8 +177,8 @@ func TestColumnCellsLeavesOutNulls(t *testing.T) {
 		t.Fatalf("ColumnCells: %v", err)
 	}
 	want := []Cell{
-		{Ref: "B2", Value: "x", Raw: "x", Token: "A"},
-		{Ref: "B4", Value: "z", Raw: "z", Token: "A"},
+		{Ref: "B2", Value: "x", Raw: "x", Token: "text A"},
+		{Ref: "B4", Value: "z", Raw: "z", Token: "text A"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ColumnCells = %+v, want %+v", got, want)
