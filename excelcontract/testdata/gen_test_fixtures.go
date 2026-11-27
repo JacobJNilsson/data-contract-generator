@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -25,7 +26,74 @@ func main() {
 	genTablePlusNotes()
 	genHeaderlessTable()
 	genMergedCaption()
+	genTypedCells()
 	fmt.Println("All test fixtures generated.")
+}
+
+// genTypedCells writes typed cells for the cell tokens of the field shape.
+// Each column checks one token rule:
+//
+//   - Amount: numbers under two number formats, one token "number 9.9".
+//   - Code: digit strings, token "text 9".
+//   - Booked: time.Time values under two date formats, token "date".
+//   - Custom: numbers under the custom format "d mmm yyyy", token "date".
+//   - Length: numbers under the custom format 0" mm", whose quoted m is
+//     text, so the token stays "number 9".
+//   - Formula: two formulas saved without a cached value, which count as
+//     null, and one number.
+//   - Flag: booleans, token "bool".
+func genTypedCells() {
+	f := excelize.NewFile()
+	defer f.Close()
+
+	style := func(s *excelize.Style) int {
+		id, err := f.NewStyle(s)
+		must(err)
+		return id
+	}
+	custom := func(code string) int { return style(&excelize.Style{CustomNumFmt: &code}) }
+	thousands := style(&excelize.Style{NumFmt: 4}) // #,##0.00
+	plain := style(&excelize.Style{NumFmt: 2})     // 0.00
+	shortDate := style(&excelize.Style{NumFmt: 14})
+	isoDate := custom("yyyy-mm-dd")
+	longDate := custom("d mmm yyyy")
+	millimetres := custom(`0" mm"`)
+
+	f.SetSheetRow("Sheet1", "A1", &[]any{"Amount", "Code", "Booked", "Custom", "Length", "Formula", "Flag"})
+	rows := []struct {
+		amount      float64
+		amountStyle int
+		code        string
+		booked      time.Time
+		bookedStyle int
+		custom      float64
+		length      int
+		flag        bool
+	}{
+		{1500.5, thousands, "0042", time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), shortDate, 45293, 12, true},
+		{2300.25, plain, "1234", time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC), isoDate, 45296, 15, false},
+		{99.75, thousands, "7", time.Date(2024, 1, 9, 0, 0, 0, 0, time.UTC), shortDate, 45300, 20, true},
+	}
+	for i, r := range rows {
+		row := i + 2
+		cell := func(col string) string { return fmt.Sprintf("%s%d", col, row) }
+		f.SetCellValue("Sheet1", cell("A"), r.amount)
+		must(f.SetCellStyle("Sheet1", cell("A"), cell("A"), r.amountStyle))
+		f.SetCellStr("Sheet1", cell("B"), r.code)
+		f.SetCellValue("Sheet1", cell("C"), r.booked)
+		must(f.SetCellStyle("Sheet1", cell("C"), cell("C"), r.bookedStyle))
+		f.SetCellValue("Sheet1", cell("D"), r.custom)
+		must(f.SetCellStyle("Sheet1", cell("D"), cell("D"), longDate))
+		f.SetCellValue("Sheet1", cell("E"), r.length)
+		must(f.SetCellStyle("Sheet1", cell("E"), cell("E"), millimetres))
+		f.SetCellValue("Sheet1", cell("G"), r.flag)
+	}
+	must(f.SetCellFormula("Sheet1", "F2", "A2*2"))
+	must(f.SetCellFormula("Sheet1", "F3", "A3*2"))
+	f.SetCellValue("Sheet1", "F4", 8)
+
+	must(f.SaveAs("excelcontract/testdata/typed-cells.xlsx"))
+	fmt.Println("  typed-cells.xlsx")
 }
 
 func genSimple() {
