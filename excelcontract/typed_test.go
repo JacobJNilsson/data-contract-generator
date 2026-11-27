@@ -225,8 +225,19 @@ func TestIsDateFormatCustomCodeFirst(t *testing.T) {
 // BenchmarkAnalyzeFile100kRows records the cost of the typed pass on a
 // sheet of 100000 rows: text, a formatted number, and a date per row.
 func BenchmarkAnalyzeFile100kRows(b *testing.B) {
+	benchmarkAnalyzeFile(b, 100000, 3)
+}
+
+// BenchmarkAnalyzeFileWide records the cost of a table of 200 columns and
+// MaxShapeRows rows, where the per-column reads of the shape add up.
+func BenchmarkAnalyzeFileWide(b *testing.B) {
+	benchmarkAnalyzeFile(b, MaxShapeRows, 200)
+}
+
+// benchmarkAnalyzeFile analyzes a generated workbook of the given size.
+func benchmarkAnalyzeFile(b *testing.B, rows, columns int) {
 	path := filepath.Join(b.TempDir(), "large.xlsx")
-	writeLargeWorkbook(b, path, 100000)
+	writeLargeWorkbook(b, path, rows, columns)
 	b.ResetTimer()
 	for b.Loop() {
 		if _, err := AnalyzeFile(ctx, path, nil); err != nil {
@@ -236,8 +247,9 @@ func BenchmarkAnalyzeFile100kRows(b *testing.B) {
 }
 
 // writeLargeWorkbook writes a one-table workbook of the given data rows
-// with the stream writer.
-func writeLargeWorkbook(b *testing.B, path string, rows int) {
+// with the stream writer. Its columns repeat text, a formatted number,
+// and a date.
+func writeLargeWorkbook(b *testing.B, path string, rows, columns int) {
 	b.Helper()
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -253,18 +265,28 @@ func writeLargeWorkbook(b *testing.B, path string, rows int) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	if err := sw.SetRow("A1", []any{"Text", "Amount", "Booked"}); err != nil {
+	header := make([]any, columns)
+	for c := range header {
+		header[c] = fmt.Sprintf("Column %d", c+1)
+	}
+	if err := sw.SetRow("A1", header); err != nil {
 		b.Fatal(err)
 	}
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	row := make([]any, columns)
 	for r := 0; r < rows; r++ {
+		for c := range row {
+			switch c % 3 {
+			case 0:
+				row[c] = fmt.Sprintf("P-%d", r)
+			case 1:
+				row[c] = excelize.Cell{StyleID: amount, Value: float64(r) + 0.25}
+			default:
+				row[c] = excelize.Cell{StyleID: day, Value: start.AddDate(0, 0, r%365)}
+			}
+		}
 		ref, _ := excelize.CoordinatesToCellName(1, r+2)
-		err := sw.SetRow(ref, []any{
-			fmt.Sprintf("P-%d", r),
-			excelize.Cell{StyleID: amount, Value: float64(r) + 0.25},
-			excelize.Cell{StyleID: day, Value: start.AddDate(0, 0, r%365)},
-		})
-		if err != nil {
+		if err := sw.SetRow(ref, row); err != nil {
 			b.Fatal(err)
 		}
 	}
