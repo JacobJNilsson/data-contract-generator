@@ -139,10 +139,11 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 	visible, visErr := f.GetSheetVisible(sheet)
 	hidden := visErr == nil && !visible
 
+	cells := sheetCells{rows: rows}
 	var schemas []contract.SchemaContract
 	var decimals []profile.DecimalEvidence
 	for ordinal, t := range seg.Tables {
-		sc, evidence := buildTableSchema(rows, t, opts)
+		sc, evidence := buildTableSchema(&cells, t, opts)
 		if sc == nil {
 			issues = append(issues, fmt.Sprintf("table at %s has a header but no data rows; no schema was emitted for it", cellName(t.StartRow, t.StartCol)))
 			continue
@@ -210,8 +211,10 @@ func tableMetadata(t Segment, hidden bool) contract.Metadata {
 // buildTableSchema profiles one table region into a SchemaContract.
 // It returns nil for a table with a header and no data rows; the caller
 // records that loudly. The second result is the decimal evidence of each
-// numeric column.
-func buildTableSchema(rows [][]string, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence) {
+// numeric column. Each field's shape counts the cell tokens of
+// tableCells, so the shape and ColumnCells share one token rule.
+func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence) {
+	rows := cells.rows
 	numFields := t.EndCol - t.StartCol + 1
 	var fieldNames []string
 	issues := t.Issues
@@ -277,6 +280,7 @@ func buildTableSchema(rows [][]string, t Segment, opts *Options) (*contract.Sche
 		if colTypes[i] == profile.TypeNumeric {
 			evidence = append(evidence, profilers[i].Decimal())
 		}
+		shape := cellShape(cells.tableCells(t, i, MaxShapeRows)).Contract()
 		fields[i] = contract.FieldDefinition{
 			Name:     name,
 			DataType: string(colTypes[i]),
@@ -290,6 +294,7 @@ func buildTableSchema(rows [][]string, t Segment, opts *Options) (*contract.Sche
 				MaxValue:            fp.MaxValue,
 				TopValues:           fp.TopValues,
 				SampleSize:          fp.TotalCount,
+				Shape:               &shape,
 			},
 		}
 	}

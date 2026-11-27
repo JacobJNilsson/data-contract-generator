@@ -2,6 +2,7 @@ package fingerprint
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -333,6 +334,40 @@ func TestMultiSchemaFanout(t *testing.T) {
 	}
 	if !locators["Orders"] || !locators["Customers"] || !locators["Items"] {
 		t.Errorf("locators not taken from sheet names: %v", locators)
+	}
+}
+
+// TestFromDataContractIgnoresShape: a field's value shape stays outside
+// identity, so a contract with shapes has the objects and hashes of the
+// same contract without them.
+func TestFromDataContractIgnoresShape(t *testing.T) {
+	build := func(shape *contract.ShapeSignature) *contract.DataContract {
+		return &contract.DataContract{
+			Metadata: map[string]any{"source_format": "xlsx"},
+			Schemas: []contract.SchemaContract{{
+				Name:     "Sheet1",
+				Metadata: contract.Metadata{"has_header": true},
+				Fields: []contract.FieldDefinition{
+					{Name: "id", DataType: "text", Profile: &contract.FieldProfile{Shape: shape}},
+				},
+			}},
+		}
+	}
+	shape := &contract.ShapeSignature{Masks: []contract.MaskCount{{Mask: "A-9", Count: 3}}, DominantShare: 1, LengthMin: 5, LengthMax: 5}
+	got, _, err := FromDataContract(build(shape))
+	if err != nil {
+		t.Fatalf("FromDataContract(with shape): %v", err)
+	}
+	want, _, err := FromDataContract(build(nil))
+	if err != nil {
+		t.Fatalf("FromDataContract(without shape): %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("units with shape = %+v, want %+v", got, want)
+	}
+	gotHash, wantHash := got[0].Object.Hash(), want[0].Object.Hash()
+	if gotHash != wantHash {
+		t.Errorf("hash with shape = %s, want %s", gotHash, wantHash)
 	}
 }
 
