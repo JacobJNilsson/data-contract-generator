@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/JacobJNilsson/data-contract-generator/contract"
 )
 
 // maxTrackedMasks bounds the per-column mask map so adversarial data
@@ -147,6 +149,36 @@ func (t *shapeTracker) signature() ShapeSignature {
 		DominantShare: share,
 		LengthMin:     t.lenMin,
 		LengthMax:     t.lenMax,
+	}
+}
+
+// Contract copies the signature into the data-only contract type, so a
+// contract.FieldProfile can carry it.
+func (s ShapeSignature) Contract() contract.ShapeSignature {
+	masks := make([]contract.MaskCount, len(s.Masks))
+	for i, m := range s.Masks {
+		masks[i] = contract.MaskCount{Mask: m.Mask, Count: m.Count}
+	}
+	return contract.ShapeSignature{
+		Masks:         masks,
+		DominantShare: s.DominantShare,
+		LengthMin:     s.LengthMin,
+		LengthMax:     s.LengthMax,
+	}
+}
+
+// ShapeFromContract copies a signature read from a contract back into
+// the profile type, so a caller can compare it with DriftsFrom.
+func ShapeFromContract(s contract.ShapeSignature) ShapeSignature {
+	masks := make([]MaskCount, len(s.Masks))
+	for i, m := range s.Masks {
+		masks[i] = MaskCount{Mask: m.Mask, Count: m.Count}
+	}
+	return ShapeSignature{
+		Masks:         masks,
+		DominantShare: s.DominantShare,
+		LengthMin:     s.LengthMin,
+		LengthMax:     s.LengthMax,
 	}
 }
 

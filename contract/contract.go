@@ -56,6 +56,26 @@ type FieldProfile struct {
 	MaxValue            *string    `json:"max_value"`
 	TopValues           []TopValue `json:"top_values,omitempty"`
 	SampleSize          int        `json:"sample_size"`
+	// Shape is the column's value-shape evidence. It is nil for an
+	// analyzer that records no shape, and then the JSON has no shape key.
+	Shape *ShapeSignature `json:"shape,omitempty"`
+}
+
+// ShapeSignature holds the data of profile.ShapeSignature with the same
+// JSON tags. The type lives here because profile imports contract, so
+// contract cannot name the profile type. Use profile.ShapeFromContract
+// to compare two signatures.
+type ShapeSignature struct {
+	Masks         []MaskCount `json:"masks"`
+	DominantShare float64     `json:"dominant_share"`
+	LengthMin     int         `json:"length_min"`
+	LengthMax     int         `json:"length_max"`
+}
+
+// MaskCount is one format mask and how many values matched it.
+type MaskCount struct {
+	Mask  string `json:"mask"`
+	Count int    `json:"count"`
 }
 
 // TopValue pairs a value with how many times it appears.
