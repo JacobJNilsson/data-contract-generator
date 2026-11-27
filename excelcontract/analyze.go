@@ -122,15 +122,15 @@ func refuseLocatorCollision(schemas []contract.SchemaContract) error {
 // table that carries data. It returns the schemas plus the sheet-level
 // issues (strays, empty or header-only tables).
 func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.SchemaContract, []string, []profile.DecimalEvidence, error) {
-	rows, err := f.GetRows(sheet)
+	cells, err := readSheetCells(f, sheet)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read rows: %w", err)
+		return nil, nil, nil, err
 	}
-	if len(rows) == 0 {
+	if len(cells.typed) == 0 {
 		return nil, nil, nil, nil
 	}
 
-	seg := SegmentSheet(rows, DeclaredTables(f, sheet))
+	seg := SegmentSheet(cells.typed, DeclaredTables(f, sheet))
 	issues := seg.Issues
 
 	// Hidden sheets are analyzed like visible ones (XL-L3): skipping
@@ -139,10 +139,6 @@ func analyzeSheet(f *excelize.File, sheet string, opts *Options) ([]contract.Sch
 	visible, visErr := f.GetSheetVisible(sheet)
 	hidden := visErr == nil && !visible
 
-	cells, err := newSheetCells(f, sheet, rows)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 	var schemas []contract.SchemaContract
 	var decimals []profile.DecimalEvidence
 	for ordinal, t := range seg.Tables {
@@ -217,10 +213,12 @@ func tableMetadata(t Segment, hidden bool) contract.Metadata {
 // buildTableSchema profiles one table region into a SchemaContract.
 // It returns nil for a table with a header and no data rows; the caller
 // records that loudly. The second result is the decimal evidence of each
-// numeric column. Each field's shape counts the cell tokens of
-// tableCells, so the shape and ColumnCells share one token rule.
+// numeric column. Names, types, profiles and samples read the typed
+// grid, so a number format changes none of them. Each field's shape
+// counts the cell tokens of tableCells, so the shape and ColumnCells
+// share one token rule.
 func buildTableSchema(cells *sheetCells, t Segment, opts *Options) (*contract.SchemaContract, []profile.DecimalEvidence, error) {
-	rows := cells.rows
+	rows := cells.typed
 	numFields := t.EndCol - t.StartCol + 1
 	var fieldNames []string
 	issues := t.Issues

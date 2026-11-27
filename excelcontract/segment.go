@@ -58,7 +58,9 @@ type Segmentation struct {
 	Issues []string
 }
 
-// SegmentSheet splits one sheet's cells into table regions. Detection
+// SegmentSheet splits one sheet's cells into table regions. The rows are
+// the sheet's typed grid from SheetRows, which is the grid the analysis
+// segments. Detection
 // priority follows XL-3: every declared Table object is honored with its
 // full range (header row and column bounds), then the remaining cells
 // are segmented heuristically into row bands separated by blank rows.
